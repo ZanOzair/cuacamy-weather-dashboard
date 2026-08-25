@@ -20,6 +20,27 @@ const check = (label, ok, detail = '') => {
   if (!ok) failures.push(`${label}${detail ? ': ' + detail : ''}`);
 };
 
+/**
+ * Poll a page predicate until it holds. Written out rather than using
+ * page.waitForFunction because its second parameter is the argument passed to
+ * the page function, not the options — an easy call to get wrong, and a wait
+ * that silently does not wait is worse than no wait at all.
+ */
+async function waitFor(page, label, predicate, { timeout = 60000, interval = 500 } = {}) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    let ok = false;
+    try { ok = await page.evaluate(predicate); } catch { /* mid-navigation */ }
+    if (ok) {
+      console.log(`  … ${label} after ${((Date.now() - started) / 1000).toFixed(1)}s`);
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
+  console.log(`  … ${label} TIMED OUT after ${(timeout / 1000).toFixed(0)}s`);
+  return false;
+}
+
 const browser = await chromium.launch();
 const context = await browser.newContext({
   viewport: { width: 1440, height: 1000 },
@@ -41,13 +62,9 @@ console.log(`\nEnd-to-end smoke test — ${BASE}\n`);
 await page.goto(BASE, { waitUntil: 'load' });
 
 // Wait for live data rather than a fixed sleep.
-await page.waitForFunction(
-  () => {
-    const t = document.querySelector('#cur-temp')?.textContent || '';
-    return /^-?\d+$/.test(t.trim());
-  },
-  { timeout: 45000 }
-).catch(() => {});
+await waitFor(page, 'temperature rendered',
+  () => /^-?\d+$/.test((document.querySelector('#cur-temp')?.textContent || '').trim()),
+  { timeout: 60000 });
 
 const dash = await page.evaluate(() => ({
   temp: document.querySelector('#cur-temp')?.textContent?.trim(),
@@ -84,10 +101,9 @@ check('Assistant briefing generated',
       (dash.briefing || '').slice(0, 90));
 
 // The hazard sweep makes its own calls; give it room.
-await page.waitForFunction(
+await waitFor(page, 'hazard sweep finished',
   () => document.querySelector('#hazard-strip')?.dataset.state === 'ready',
-  { timeout: 45000 }
-).catch(() => {});
+  { timeout: 60000 });
 
 const hazard = await page.evaluate(() => ({
   state: document.querySelector('#hazard-strip')?.dataset.state,
@@ -130,11 +146,10 @@ const monsoon = await page.textContent('#monsoon-name');
 check('Monsoon phase resolved', Boolean(monsoon) && monsoon !== '—', monsoon);
 
 await page.click('#btn-climate');
-await page.waitForFunction(
+await waitFor(page, 'climate normal computed',
   () => !document.querySelector('#climate-body')?.hidden ||
         (document.querySelector('#climate-status')?.textContent || '').includes('Could not'),
-  { timeout: 90000 }
-).catch(() => {});
+  { timeout: 120000, interval: 1000 });
 const climate = await page.evaluate(() => ({
   shown: !document.querySelector('#climate-body')?.hidden,
   normalTemp: document.querySelector('#climate-normal-temp')?.textContent,
@@ -149,7 +164,9 @@ check('Climate normal computed from the 1991-2020 archive', climate.shown,
 const mobile = await context.newPage();
 await mobile.goto(BASE, { waitUntil: 'load' });
 await mobile.setViewportSize({ width: 390, height: 844 });
-await mobile.waitForTimeout(6000);
+await waitFor(mobile, 'mobile dashboard populated',
+  () => /^-?\d+$/.test((document.querySelector('#cur-temp')?.textContent || '').trim()),
+  { timeout: 60000 });
 for (const view of ['dashboard', 'alerts', 'climate', 'explore', 'analytics']) {
   await mobile.click('#tab-' + view);
   await mobile.waitForTimeout(700);

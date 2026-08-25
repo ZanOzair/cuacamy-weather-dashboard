@@ -4,8 +4,8 @@
 
 # CuacaMY — Malaysia Weather Dashboard
 
-**A production-grade weather dashboard built with nothing but HTML, CSS and JavaScript.**
-No framework. No bundler. No `node_modules`. No build step.
+**A production-grade weather and hazard dashboard built with nothing but HTML, CSS and JavaScript.**
+No framework. No bundler. No `node_modules`. No build step. **No API key needed.**
 
 *Cuaca* is Malay for *weather*.
 
@@ -27,18 +27,23 @@ A weather dashboard for Malaysia that behaves like a real product, not a tutoria
 
 | | |
 |---|---|
-| **Search anywhere** | Instant autocomplete over **206 Malaysian towns across all 16 states and federal territories**, bundled into the app — plus worldwide geocoding through OpenWeatherMap. |
+| **Works with no setup** | Open-Meteo is the default provider — no key, no sign-up. Open the link and you get real live weather immediately. |
+| **Finds you** | Detects your location on arrival and shows the weather and hazards for exactly where you are. |
+| **Hazard alerts** | Rainfall, thunderstorms, downpour intensity, wind gusts, heat, UV, haze, river flooding and earthquakes — each graded, explained, and sourced. |
+| **Alarm & notifications** | Desktop notifications and an audible alarm above a severity you choose. |
+| **Search anywhere** | Instant autocomplete over **206 Malaysian towns across all 16 states and federal territories**, bundled into the app — plus worldwide geocoding. |
 | **Current conditions** | Temperature, feels-like, humidity, wind speed and bearing, pressure, visibility, cloud cover, computed dew point and a plain-English comfort reading. |
 | **5-day forecast** | Clean cards with high/low, dominant condition, rain probability and a relative temperature-range bar. Tap any day for its 3-hourly breakdown. |
 | **Next 24 hours** | A smoothed Canvas chart you can switch between temperature, rain chance and wind. |
-| **Air quality** | Live AQI with PM2.5, PM10, ozone, NO₂, SO₂ and CO, plus guidance on what the number means for you. |
+| **Air quality** | The Malaysian DOE **Air Pollutant Index** — the 0–500 scale Malaysians actually use — computed from PM2.5 and PM10, with a full pollutant breakdown. |
+| **Monsoon calendar** | Which of the four phases we are in, what it means, and whether your state is in its main impact zone. |
+| **Local climate normal** | Computes the 1991–2020 normal for *your* coordinates from 30 years of reanalysis, then shows this month's temperature and rainfall anomaly. |
+| **Analytical assistant** | Ask it questions in plain English. It answers from the loaded data and shows the readings behind each answer. |
 | **Navigation** | One-tap **Waze** and **Google Maps** deep links that hand off to the native app on mobile. |
-| **Find me** | Geolocation with reverse geocoding, falling back to the nearest bundled Malaysian town when offline. |
 | **Accounts** | Sign up, sign in and sign out — locally with WebCrypto, or through Firebase with Google sign-in. |
 | **Sync** | Saved places and preferences persist in IndexedDB and mirror to Cloud Firestore when signed in. |
 | **Analytics** | A live Core Web Vitals dashboard, API latency percentiles, cache hit rate and a personal usage chart — all measured in-browser, none of it sent anywhere. |
 | **Offline** | Full PWA: installable, service-worker cached, and usable in aeroplane mode. |
-| **Email** | Generates a formatted briefing and opens it as a prefilled Gmail draft (or `mailto:`), copied to the clipboard as well. |
 
 ---
 
@@ -46,10 +51,13 @@ A weather dashboard for Malaysia that behaves like a real product, not a tutoria
 
 **→ https://zanozair.github.io/cuacamy-weather-dashboard/**
 
-The demo runs without an API key. Rather than showing an empty shell, it generates
-deterministic tropical weather from a seeded PRNG, so every feature — charts, forecast,
-air quality, analytics — is fully explorable. A `DEMO DATA` badge always tells you when
-you are looking at synthetic values.
+**No API key required.** The demo serves real live data from Open-Meteo, which needs no
+sign-up and permits browser requests. Add an OpenWeatherMap key only if you specifically
+want that provider.
+
+If every provider is unreachable — you are offline, or an API is down — the app falls back
+to a deterministic synthetic model rather than showing an empty shell, and labels it
+`Offline estimate` so you always know what you are looking at.
 
 ### More screens
 
@@ -222,6 +230,12 @@ read top to bottom:
 | 10 | Application state | 22 | Event wiring |
 | 11 | Data orchestration | 23 | Service worker |
 | 12 | Dashboard rendering | 24 | Boot |
+| 06B | **Open-Meteo provider** | 25 | **Monsoon & season** |
+| | | 26 | **Hazard engine** |
+| | | 27 | **Alerting** |
+| | | 28 | **Climate normals** |
+| | | 29 | **Analytical assistant** |
+| | | 30 | **Alerts / climate rendering** |
 
 ### The network layer
 
@@ -248,6 +262,41 @@ On top of that, four things a real dashboard needs and `fetch` does not provide:
 - **Stale-while-revalidate** — cached data paints instantly, then refreshes behind the
   user's back. Errors during revalidation are swallowed, because there is already
   usable data on screen.
+
+### Where the numbers come from
+
+Every threshold in the hazard engine is sourced, not invented, and each alert shows the
+reading that triggered it:
+
+| Hazard | Basis |
+|---|---|
+| Rainfall | MetMalaysia's continuous-rain warning bands — *Waspada* above 60 mm/24 h, *Buruk* above 150 mm, *Bahaya* above 250 mm |
+| Downpours | MetMalaysia issues a thunderstorm warning at 20 mm/hour |
+| Heat | MetMalaysia's heatwave levels on daily maximum: 35–37 °C, 37–40 °C, above 40 °C |
+| Air quality | Malaysian DOE Air Pollutant Index — piecewise sub-indices on 24-hour PM2.5 and PM10 means, highest wins |
+| Flooding | Copernicus GloFAS river discharge, judged against its own 90-day distribution for that reach |
+| Earthquakes | USGS magnitude, distance, tsunami flag and PAGER alert level |
+| Seasons | The Malaysian monsoon calendar — a calendar fact, computed locally with no network call |
+
+Two honest limits, stated in the UI as well as here:
+
+- The Air Pollutant Index is **modelled from reanalysis, not read from a DOE station**. It
+  is a good estimate; it is not an official reading.
+- GloFAS is a continental-scale model. It is an **early signal that a river is running
+  high**, not a forecast that your street will flood. The app links to
+  [JPS InfoBanjir](https://publicinfobanjir.water.gov.my/) for actual gauge readings.
+
+### Why the assistant is not an LLM
+
+A static site cannot hide an API key. Shipping an LLM integration would mean either
+exposing a key to every visitor, or asking each visitor to paste their own — a real
+security weakness in a project whose whole claim is that it has none.
+
+So the assistant reasons over the data already in memory instead. It matches intent from
+your question, computes the answer, and lists the readings it used. That makes it
+auditable, instant, free, functional offline, and incapable of inventing a rainfall
+figure. The trade-off is that it understands a fixed set of intents rather than arbitrary
+language — a deliberate exchange of flexibility for trustworthiness.
 
 ### Performance
 

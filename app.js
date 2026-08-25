@@ -1191,7 +1191,17 @@ const OpenMeteo = {
     });
   },
 
-  /** Daily reanalysis, used to compute a real local climate normal. */
+  /**
+   * Daily reanalysis, used to compute a real local climate normal.
+   *
+   * `models=era5` is pinned deliberately. Left to its default the archive
+   * picks the best available model for each date range, which means a
+   * thirty-year baseline comes from ERA5 at 31 km while the last few weeks
+   * can come from ECMWF IFS at 9 km. Differencing those two produces an
+   * anomaly that is really just a change of grid resolution — a coarse cell
+   * averages in cooler surrounding terrain, a fine cell sits over the city.
+   * Both sides of the comparison must come from the same model.
+   */
   async archive(lat, lon, startDate, endDate) {
     const url = this.url(OM.archive, {
       latitude: round(lat, 3),
@@ -1199,6 +1209,7 @@ const OpenMeteo = {
       start_date: startDate,
       end_date: endDate,
       daily: 'temperature_2m_mean,temperature_2m_max,precipitation_sum',
+      models: 'era5',
       timezone: 'auto'
     });
     // Thirty years of daily rows is a large payload, so it bypasses the shared
@@ -3782,7 +3793,8 @@ const Climate = {
     // Month-to-date observations come from the same reanalysis, so the
     // comparison is like for like rather than mixing model sources.
     const start = `${now.getFullYear()}-${String(m + 1).padStart(2, '0')}-01`;
-    const end = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+    // ERA5 runs behind real time; ask only for days it will actually have.
+    const end = new Date(Date.now() - 8 * 86400000).toISOString().slice(0, 10);
     let observed = null;
 
     if (end >= start) {

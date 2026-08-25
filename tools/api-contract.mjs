@@ -131,8 +131,26 @@ const end = new Date(Date.now() - 7 * 86400000);
 const start = new Date(Date.UTC(end.getUTCFullYear() - 3, 0, 1));
 await check('Open-Meteo · archive (climate normals)',
   `${AR}?latitude=${LAT}&longitude=${LON}&start_date=${iso(start)}&end_date=${iso(end)}` +
-  `&daily=temperature_2m_mean,precipitation_sum&timezone=auto`,
+  `&daily=temperature_2m_mean,precipitation_sum&models=era5&timezone=auto`,
   ['daily.time', 'daily.temperature_2m_mean', 'daily.precipitation_sum']);
+
+// The app pins models=era5 so a thirty-year baseline and a month-to-date
+// window come from the same model; confirm era5 still covers recent dates.
+const recentStart = new Date(Date.now() - 20 * 86400000);
+const recentEnd = new Date(Date.now() - 8 * 86400000);
+const recent = await check('Open-Meteo · archive era5 covers recent dates',
+  `${AR}?latitude=${LAT}&longitude=${LON}&start_date=${iso(recentStart)}&end_date=${iso(recentEnd)}` +
+  `&daily=temperature_2m_mean&models=era5&timezone=auto`,
+  ['daily.time', 'daily.temperature_2m_mean']);
+if (recent) {
+  const values = (recent.daily?.temperature_2m_mean || []).filter((v) => typeof v === 'number');
+  console.log(`  era5 returned ${values.length} of ${recent.daily?.time?.length ?? 0} recent days` +
+              (values.length ? `, mean ${(values.reduce((a, b) => a + b, 0) / values.length).toFixed(1)} °C` : ''));
+  if (!values.length) {
+    console.log('  !! era5 has no finalised days in that window — the climate panel would show nothing');
+    results.push({ name: 'era5 recent coverage', ok: false, detail: 'no finalised days', ms: 0 });
+  }
+}
 
 const quakeFrom = new Date(Date.now() - 30 * 86400000);
 // The FDSN query endpoint reports limit/offset rather than metadata.count —

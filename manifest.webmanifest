@@ -1,0 +1,24 @@
+{
+  "name": "CuacaMY — Malaysia Weather Dashboard",
+  "short_name": "CuacaMY",
+  "description": "Live weather, 5-day forecast and air quality for every state and town in Malaysia.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#070b17",
+  "theme_color": "#0b1020",
+  "lang": "en-MY",
+  "dir": "ltr",
+  "categories": ["weather", "travel", "utilities"],
+  "icons": [
+    { "src": "./assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./assets/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "./assets/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Explore Malaysia", "url": "./index.html#explore" },
+    { "name": "Performance analytics", "url": "./index.html#analytics" }
+  ]
+}

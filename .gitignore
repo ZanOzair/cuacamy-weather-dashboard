@@ -1,0 +1,17 @@
+# Personal overrides, if you prefer keeping keys entirely out of the repo.
+# (config.js itself IS tracked — it ships blank; see the notes inside it.)
+config.local.js
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Dependency + build output (this project has neither, but just in case)
+node_modules/
+dist/
+.cache/
+*.log

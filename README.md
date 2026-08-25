@@ -9,7 +9,7 @@ No framework. No bundler. No `node_modules`. No build step.
 
 *Cuaca* is Malay for *weather*.
 
-[![Deploy to GitHub Pages](https://github.com/ZanOzair/cuacamy-weather-dashboard/actions/workflows/pages.yml/badge.svg)](https://github.com/ZanOzair/cuacamy-weather-dashboard/actions/workflows/pages.yml)
+[![CI](https://github.com/ZanOzair/cuacamy-weather-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/ZanOzair/cuacamy-weather-dashboard/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)
 ![Vanilla JS](https://img.shields.io/badge/vanilla-HTML%20%C2%B7%20CSS%20%C2%B7%20JS-f7df1e)
@@ -44,6 +44,7 @@ A weather dashboard for Malaysia that behaves like a real product, not a tutoria
 ## Live demo
 
 **→ https://zanozair.github.io/cuacamy-weather-dashboard/**
+*(live once GitHub Pages is switched on — see [Deployment](#deployment))*
 
 The demo runs without an API key. Rather than showing an empty shell, it generates
 deterministic tropical weather from a seeded PRNG, so every feature — charts, forecast,
@@ -136,12 +137,26 @@ the rules above.
 
 ## Deployment
 
-`main` deploys itself to GitHub Pages via [`.github/workflows/pages.yml`](.github/workflows/pages.yml),
-which first syntax-checks the JavaScript, validates the manifest, and warns if an API
-key has been committed. To enable it: **Settings → Pages → Source → GitHub Actions**.
+Two workflows, deliberately separate:
 
-Because it is pure static files, it drops onto Netlify, Vercel, Cloudflare Pages or any
-web server unchanged.
+- [`ci.yml`](.github/workflows/ci.yml) — runs on every push and pull request. Syntax-checks
+  the JavaScript, validates the manifest, verifies every asset referenced by `index.html`
+  and the manifest actually exists, and warns if an API key has been committed. This is
+  what the build badge tracks.
+- [`pages.yml`](.github/workflows/pages.yml) — publishes to GitHub Pages.
+
+**One-time setup before the first deploy:**
+
+> **Settings → Pages → Build and deployment → Source → “GitHub Actions”**
+
+This step cannot be automated. A repository's `GITHUB_TOKEN` is not allowed to create a
+Pages site — the API answers `Resource not accessible by integration` — so
+`actions/configure-pages` with `enablement: true` does not work around it either. Until
+Pages is switched on, the deploy workflow fails by design; CI is kept in a separate
+workflow so the badge above reflects the code, not the hosting setup.
+
+Because it is pure static files, it also drops onto Netlify, Vercel, Cloudflare Pages or
+any web server unchanged — no configuration, no build command.
 
 **One header worth adding** where your host allows it — browsers ignore `frame-ancestors`
 in a `<meta>` CSP, so clickjacking protection has to come from a response header:
@@ -163,6 +178,7 @@ cuacamy-weather-dashboard/
 ├── config.js           Blank by default; your keys go here
 ├── config.example.js   Annotated configuration template
 ├── manifest.webmanifest
+├── .nojekyll           Serve files verbatim, no Jekyll preprocessing
 └── assets/             Generated PNG icons, favicon, social preview
 ```
 

@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify static assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check app.js
+          node --check sw.js
+          node --check config.js
+          node --check config.example.js
+
+      - name: Validate JSON
+        run: node -e "JSON.parse(require('fs').readFileSync('manifest.webmanifest','utf8')); console.log('manifest ok')"
+
+      - name: Check every referenced local asset exists
+        run: |
+          status=0
+          # Pull src/href values out of the HTML and manifest, keep local paths,
+          # and confirm each one is actually in the repo.
+          for f in $(grep -ohE '(src|href)="\./[^"]+"' index.html \
+                     | sed -E 's/.*"\.\/([^"]+)".*/\1/' | sort -u) \
+                   $(grep -ohE '"\./assets/[^"]+"' manifest.webmanifest \
+                     | tr -d '"' | sed 's|^\./||' | sort -u); do
+            if [ ! -e "$f" ]; then echo "missing asset: $f" >&2; status=1; fi
+          done
+          [ $status -eq 0 ] && echo "all referenced assets present"
+          exit $status
+
+      - name: Warn if an API key is committed
+        run: |
+          # A static site cannot hide a key, so committing one is a legitimate
+          # deployment choice — but it must be a *restricted* key. This warns
+          # rather than blocking.
+          if grep -rInE '(appid|openWeatherKey)["'"'"']?\s*[:=]\s*["'"'"'][A-Za-z0-9]{20,}' \
+               --include='*.js' --include='*.html' . ; then
+            echo "::warning::An API key is committed. Restrict it to your domain in the OpenWeatherMap dashboard."
+          else
+            echo "No committed API keys found."
+          fi

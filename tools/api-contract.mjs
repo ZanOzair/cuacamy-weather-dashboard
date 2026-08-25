@@ -135,10 +135,15 @@ await check('Open-Meteo · archive (climate normals)',
   ['daily.time', 'daily.temperature_2m_mean', 'daily.precipitation_sum']);
 
 const quakeFrom = new Date(Date.now() - 30 * 86400000);
+// The FDSN query endpoint reports limit/offset rather than metadata.count —
+// count only appears on the pre-built summary feeds.
 await check('USGS · earthquakes near Malaysia',
   `${EQ}?format=geojson&latitude=${LAT}&longitude=${LON}&maxradiuskm=2000` +
   `&starttime=${iso(quakeFrom)}&minmagnitude=4&orderby=time&limit=20`,
-  ['type', 'features', 'metadata.count']);
+  ['type', 'features', 'features[0].properties.mag', 'features[0].properties.place',
+   'features[0].properties.time', 'features[0].properties.url',
+   'features[0].properties.tsunami', 'features[0].properties.sig',
+   'features[0].geometry.coordinates']);
 
 const quakes = await check('USGS · global significant feed',
   'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.geojson',

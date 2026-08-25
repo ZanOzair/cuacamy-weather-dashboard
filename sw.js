@@ -12,7 +12,7 @@
  *   readings instead of an error page.
  * =========================================================================== */
 
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const SHELL_CACHE = `cuacamy-shell-${VERSION}`;
 const DATA_CACHE  = `cuacamy-data-${VERSION}`;
 
@@ -59,7 +59,19 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  if (url.hostname === 'api.openweathermap.org') {
+  // Weather and hazard APIs: prefer the network, fall back to the last good
+  // response so an offline user still sees their most recent readings.
+  const DATA_HOSTS = [
+    'api.openweathermap.org',
+    'api.open-meteo.com',
+    'air-quality-api.open-meteo.com',
+    'geocoding-api.open-meteo.com',
+    'flood-api.open-meteo.com',
+    'archive-api.open-meteo.com',
+    'earthquake.usgs.gov',
+    'api.bigdatacloud.net'
+  ];
+  if (DATA_HOSTS.includes(url.hostname)) {
     event.respondWith(networkFirst(request));
     return;
   }

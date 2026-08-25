@@ -24,6 +24,13 @@
   style-src 'self';
   script-src 'self' https://www.gstatic.com;
   connect-src 'self'
+    https://api.open-meteo.com
+    https://air-quality-api.open-meteo.com
+    https://geocoding-api.open-meteo.com
+    https://flood-api.open-meteo.com
+    https://archive-api.open-meteo.com
+    https://earthquake.usgs.gov
+    https://api.bigdatacloud.net
     https://api.openweathermap.org
     https://www.gstatic.com
     https://identitytoolkit.googleapis.com
@@ -43,6 +50,8 @@
 <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="./assets/icon-192.png">
 <link rel="manifest" href="./manifest.webmanifest">
+<link rel="preconnect" href="https://api.open-meteo.com" crossorigin>
+<link rel="preconnect" href="https://air-quality-api.open-meteo.com" crossorigin>
 <link rel="preconnect" href="https://api.openweathermap.org" crossorigin>
 <link rel="stylesheet" href="./style.css">
 </head>
@@ -150,6 +159,11 @@
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M12 4a8 8 0 0 1 7 4.1V6a1 1 0 1 1 2 0v5a1 1 0 0 1-1 1h-5a1 1 0 1 1 0-2h2.5A6 6 0 0 0 6.2 12a1 1 0 1 1-2 0A8 8 0 0 1 12 4zm7.8 8a1 1 0 0 1 1 1 8 8 0 0 1-14.8 4.1V19a1 1 0 1 1-2 0v-5a1 1 0 0 1 1-1h5a1 1 0 1 1 0 2H7.5A6 6 0 0 0 18.8 13a1 1 0 0 1 1-1z"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M9 3h6a1 1 0 0 1 1 1v1h4a1 1 0 1 1 0 2h-1v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7H4a1 1 0 0 1 0-2h4V4a1 1 0 0 1 1-1zm1 6v9h2V9h-2zm4 0v9h2V9h-2z"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 0 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.4L11 13.6V4a1 1 0 0 1 1-1zM4 19h16a1 1 0 1 1 0 2H4a1 1 0 1 1 0-2z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2l8 3.5v6c0 5-3.4 9.4-8 10.5-4.6-1.1-8-5.5-8-10.5v-6L12 2zm-1.1 13.6l5.3-5.3-1.4-1.4-3.9 3.9-1.8-1.8-1.4 1.4 3.2 3.2z"/></symbol>
+  <symbol id="i-quake" viewBox="0 0 24 24"><path d="M2 12h3.2l2-6.4a1 1 0 0 1 1.9 0L12 15l2.4-6.2a1 1 0 0 1 1.9.1L17.8 12H22v2h-4.9a1 1 0 0 1-1-.7l-.7-2.2-2.5 6.5a1 1 0 0 1-1.9 0L8 8.8l-1.2 3.9a1 1 0 0 1-1 .7H2v-1.4z"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zm12 8H5v9h14v-9z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 2a6 6 0 0 1 6 6v3.6l1.7 3.1A1 1 0 0 1 18.8 16H5.2a1 1 0 0 1-.9-1.3L6 11.6V8a6 6 0 0 1 6-6zm0 20a3 3 0 0 1-2.8-2h5.6A3 3 0 0 1 12 22z"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9L12 2zm7 11l.9 2.6 2.6.9-2.6.9L19 20l-.9-2.6-2.6-.9 2.6-.9L19 13zM5.5 14l.7 2.1 2.1.7-2.1.7L5.5 20l-.7-2.5-2.1-.7 2.1-.7L5.5 14z"/></symbol>
   <symbol id="i-google" viewBox="0 0 24 24"><path d="M21.6 12.2c0-.7-.06-1.35-.18-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.75 3-4.3 3-7.3z" fill="#4285F4"/><path d="M12 22c2.7 0 4.96-.9 6.6-2.4l-3.2-2.5c-.9.6-2.05.95-3.4.95-2.6 0-4.8-1.75-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 13.95a6 6 0 0 1 0-3.9V7.45H3.1a10 10 0 0 0 0 9.1l3.3-2.6z" fill="#FBBC05"/><path d="M12 5.95c1.47 0 2.79.5 3.83 1.5l2.84-2.84C16.95 2.99 14.7 2 12 2A10 10 0 0 0 3.1 7.45l3.3 2.6C7.2 7.7 9.4 5.95 12 5.95z" fill="#EA4335"/></symbol>
 </svg>
 
@@ -220,6 +234,13 @@
       <button class="tab is-active" role="tab" id="tab-dashboard" aria-controls="view-dashboard" aria-selected="true" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#wx-partly-day"></use></svg> Dashboard
       </button>
+      <button class="tab" role="tab" id="tab-alerts" aria-controls="view-alerts" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-shield"></use></svg> Alerts
+        <span class="tab__count" id="tab-alerts-count" hidden></span>
+      </button>
+      <button class="tab" role="tab" id="tab-climate" aria-controls="view-climate" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-calendar"></use></svg> Season &amp; climate
+      </button>
       <button class="tab" role="tab" id="tab-explore" aria-controls="view-explore" aria-selected="false" type="button">
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pin"></use></svg> Explore Malaysia
       </button>
@@ -235,10 +256,16 @@
   <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-wind"></use></svg>
   You are offline — showing the last data cached on this device.
 </div>
+<div id="banner-geo" class="banner banner--geo" role="status" hidden>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-crosshair"></use></svg>
+  <span>Show the weather and hazard alerts for exactly where you are?</span>
+  <button class="banner__cta" id="banner-geo-yes" type="button">Use my location</button>
+  <button class="banner__dismiss" id="banner-geo-no" type="button" aria-label="Dismiss">Not now</button>
+</div>
 <div id="banner-setup" class="banner banner--info" role="status" hidden>
   <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-gear"></use></svg>
-  <span>No OpenWeatherMap API key found. The dashboard is running on bundled demo data.</span>
-  <button class="banner__cta" id="banner-setup-cta" type="button">Add a key</button>
+  <span id="banner-setup-text">Live data is unreachable, so the dashboard is showing a bundled offline estimate.</span>
+  <button class="banner__cta" id="banner-setup-cta" type="button">Settings</button>
 </div>
 
 <main id="main" class="main">
@@ -286,6 +313,8 @@
       <p id="error-msg"></p>
       <button id="error-retry" class="btn btn--primary" type="button">Try again</button>
     </div>
+
+    <div class="hazard-strip" id="hazard-strip" data-tone="clear" role="status" aria-live="polite"></div>
 
     <div class="grid" id="dash-grid">
 
@@ -402,6 +431,31 @@
         </div>
       </article>
 
+      <!-- Analytical assistant -->
+      <article class="card card--assistant" aria-labelledby="h-assistant">
+        <div class="card__head">
+          <h2 class="card__title" id="h-assistant">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sparkle"></use></svg> Ask about this place
+          </h2>
+          <span class="card__hint">Answers computed on your device</span>
+        </div>
+
+        <p class="assistant__briefing" id="assistant-briefing">Load a location to get a briefing.</p>
+
+        <div class="ask-chips" id="assistant-chips"></div>
+
+        <div class="assistant__log" id="assistant-log" role="log" aria-live="polite">
+          <p class="empty" id="assistant-empty">Ask a question, or tap one of the suggestions above.</p>
+        </div>
+
+        <form class="assistant__form" id="assistant-form">
+          <label class="sr-only" for="assistant-input">Ask a question about the weather here</label>
+          <input class="input" id="assistant-input" type="text" autocomplete="off"
+                 placeholder="e.g. will it rain this afternoon?">
+          <button class="btn btn--primary" type="submit">Ask</button>
+        </form>
+      </article>
+
       <!-- Saved places -->
       <article class="card card--saved" aria-labelledby="h-saved">
         <div class="card__head">
@@ -413,6 +467,126 @@
       </article>
 
     </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       VIEW · ALERTS
+       ════════════════════════════════════════════════════════════════════════ -->
+  <section id="view-alerts" class="view" role="tabpanel" aria-labelledby="tab-alerts" tabindex="-1" hidden>
+    <div class="view__head">
+      <h1>Hazard alerts</h1>
+      <p id="alerts-summary">Running checks…</p>
+    </div>
+
+    <div class="alert-tools">
+      <button class="btn" id="btn-notify" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bell"></use></svg> Enable notifications
+      </button>
+      <button class="btn btn--ghost" id="btn-test-alarm" type="button">Hear the alarm</button>
+      <span class="card__hint">Alerts fire while this tab is open. A static site has no server, so background push is not possible.</span>
+    </div>
+
+    <div class="alerts" id="alerts-list"></div>
+
+    <div class="grid grid--analytics">
+      <article class="card" aria-labelledby="h-quakes">
+        <div class="card__head">
+          <h2 class="card__title" id="h-quakes">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-quake"></use></svg> Recent earthquakes within 2,000 km
+          </h2>
+          <span class="card__hint">USGS · last 7 days · M4.5+</span>
+        </div>
+        <div class="quakes" id="quake-list"></div>
+        <p class="empty" id="quake-empty">No earthquakes of magnitude 4.5 or above have been recorded near here in the last week.</p>
+      </article>
+
+      <article class="card" id="flood-panel" aria-labelledby="h-flood" hidden>
+        <div class="card__head">
+          <h2 class="card__title" id="h-flood">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-drop"></use></svg> River discharge
+          </h2>
+          <span class="tag" id="flood-verdict" data-tone="info">—</span>
+        </div>
+        <ul class="statlist">
+          <li><span>Today</span><strong id="flood-now">—</strong></li>
+          <li><span>90-day median</span><strong id="flood-median">—</strong></li>
+          <li><span>Peak in next 10 days</span><strong id="flood-peak">—</strong></li>
+        </ul>
+        <div class="chart-wrap chart-wrap--sm">
+          <canvas id="flood-chart" role="img" aria-label="Modelled river discharge for the next 30 days"></canvas>
+        </div>
+        <p class="card__hint">
+          Modelled from Copernicus GloFAS for the nearest river reach — an early signal, not a
+          street-level forecast. For gauge readings see
+          <a href="https://publicinfobanjir.water.gov.my/" target="_blank" rel="noopener noreferrer">JPS InfoBanjir</a>.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       VIEW · SEASON & CLIMATE
+       ════════════════════════════════════════════════════════════════════════ -->
+  <section id="view-climate" class="view" role="tabpanel" aria-labelledby="tab-climate" tabindex="-1" hidden>
+    <div class="view__head">
+      <h1>Season &amp; climate</h1>
+      <p>Malaysia runs on monsoons, not four seasons. Below is the phase we are in now, and how this month compares with the thirty-year normal for your exact coordinates.</p>
+    </div>
+
+    <article class="card card--monsoon" aria-labelledby="h-monsoon">
+      <div class="card__head">
+        <h2 class="card__title" id="h-monsoon">Current monsoon phase</h2>
+        <span class="tag" id="monsoon-affects" data-kind="cache" hidden></span>
+      </div>
+      <div class="monsoon">
+        <div>
+          <p class="monsoon__name" id="monsoon-name">—</p>
+          <p class="monsoon__malay"><span id="monsoon-malay"></span> · <span id="monsoon-window"></span></p>
+          <p class="monsoon__summary" id="monsoon-summary"></p>
+          <ul class="monsoon__risks" id="monsoon-risks"></ul>
+        </div>
+      </div>
+      <div class="monsoon-bar" id="monsoon-bar"></div>
+    </article>
+
+    <article class="card" aria-labelledby="h-climate">
+      <div class="card__head">
+        <h2 class="card__title" id="h-climate">Local climate normal, 1991–2020</h2>
+        <button class="btn btn--sm" id="btn-climate" type="button">Compute for this location</button>
+      </div>
+
+      <p class="card__hint" id="climate-place"></p>
+      <p class="climate-status" id="climate-status" hidden></p>
+
+      <div id="climate-body" hidden>
+        <div class="climate-grid">
+          <div class="climate-cell">
+            <span class="climate-cell__label">Normal <span id="climate-month"></span> temperature</span>
+            <strong id="climate-normal-temp">—</strong>
+          </div>
+          <div class="climate-cell">
+            <span class="climate-cell__label">This month so far</span>
+            <strong id="climate-actual-temp">—</strong>
+            <span class="tag" id="climate-temp-anom" data-tone="info">—</span>
+          </div>
+          <div class="climate-cell">
+            <span class="climate-cell__label">Normal monthly rainfall</span>
+            <strong id="climate-normal-rain">—</strong>
+          </div>
+          <div class="climate-cell">
+            <span class="climate-cell__label">Rain this month so far</span>
+            <strong id="climate-actual-rain">—</strong>
+            <span class="tag" id="climate-rain-anom" data-tone="info">—</span>
+          </div>
+        </div>
+
+        <div class="chart-wrap chart-wrap--sm">
+          <canvas id="climate-chart" role="img" aria-label="Monthly climate normals for this location"></canvas>
+        </div>
+
+        <p class="card__hint" id="climate-note"></p>
+      </div>
+    </article>
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════════
@@ -627,6 +801,37 @@
       Stored only in this browser. For a public deployment, copy <code>config.example.js</code>
       to <code>config.js</code> and add a domain-restricted key there.
     </span>
+  </label>
+
+  <label class="field">
+    <span class="field__label">Weather data source</span>
+    <select class="input" id="set-provider">
+      <option value="auto">Automatic — OpenWeatherMap if a key is set, otherwise Open-Meteo</option>
+      <option value="open-meteo">Open-Meteo — free, no key needed</option>
+      <option value="owm">OpenWeatherMap — requires the key above</option>
+    </select>
+    <span class="field__hint">Open-Meteo needs no sign-up, which is why it is the default.</span>
+  </label>
+
+  <label class="field">
+    <span class="field__label">Alert me at</span>
+    <select class="input" id="set-severity">
+      <option value="2">Advisory and above — more alerts, earlier warning</option>
+      <option value="3">Warning and above — recommended</option>
+      <option value="4">Danger only — the most serious events</option>
+    </select>
+  </label>
+
+  <label class="switch">
+    <input type="checkbox" id="set-alerts" checked>
+    <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+    <span class="switch__label">Hazard alerts <small>Rain, storms, wind, heat, haze, floods and earthquakes</small></span>
+  </label>
+
+  <label class="switch">
+    <input type="checkbox" id="set-alert-sound" checked>
+    <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+    <span class="switch__label">Audible alarm <small>A tone when a new alert fires</small></span>
   </label>
 
   <label class="field">

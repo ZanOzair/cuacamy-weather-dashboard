@@ -58,3 +58,32 @@ jobs:
           else
             echo "No committed API keys found."
           fi
+
+  e2e:
+    name: End-to-end against live APIs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The app itself has no dependencies; Playwright is a test-only tool and
+      # is installed here rather than committed to the project.
+      - name: Install Playwright
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-save --no-audit --no-fund playwright@1.49.1
+          npx playwright install --with-deps chromium
+
+      - name: Serve the site and run the smoke test
+        env:
+          PORT: 8080
+        run: |
+          python3 -m http.server 8080 --bind 127.0.0.1 >/dev/null 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8080/index.html >/dev/null && break
+            sleep 1
+          done
+          node tools/e2e.mjs

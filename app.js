@@ -780,62 +780,518 @@ function demoRequest(cacheKey, ttl, label, produce) {
   return { data, stale: false, fromCache: false, demo: true };
 }
 
+/**
+ * Which provider serves a request.
+ *   'auto'        OpenWeatherMap when a key exists, otherwise Open-Meteo
+ *   'open-meteo'  always keyless
+ *   'owm'         always OpenWeatherMap (falls back if no key)
+ */
+function provider() {
+  if (state.provider === 'open-meteo') return 'open-meteo';
+  if (state.provider === 'owm' && hasKey()) return 'owm';
+  return hasKey() ? 'owm' : 'open-meteo';
+}
+
 const Api = {
+  /**
+   * Open-Meteo answers current conditions, the hourly series and the daily
+   * series in one response. current() and forecast() therefore request the
+   * same URL, and the in-flight de-duplication in request() collapses them
+   * into a single network call rather than two.
+   */
   async current(lat, lon, units) {
-    const key = `w:${round(lat,2)}:${round(lon,2)}:${units}`;
-    if (!hasKey()) return demoRequest(key, TTL.weather, 'weather', () => Demo.current(lat, lon, units));
-    const url = owmURL(OWM.weather, { lat: round(lat, 4), lon: round(lon, 4), units });
-    return request(url, { ttl: TTL.weather, label: 'weather', cacheKey: key });
+    const key = `w:${round(lat, 2)}:${round(lon, 2)}:${units}`;
+    try {
+      if (provider() === 'open-meteo') {
+        const res = await OpenMeteo.bundle(lat, lon, units);
+        const { current } = OpenMeteo.normalise(res.data, lat, lon);
+        return { ...res, data: current };
+      }
+      const url = owmURL(OWM.weather, { lat: round(lat, 4), lon: round(lon, 4), units });
+      return await request(url, { ttl: TTL.weather, label: 'weather', cacheKey: key });
+    } catch (err) {
+      return this.fallback(err, key, TTL.weather, 'weather', () => Demo.current(lat, lon, units));
+    }
   },
 
   async forecast(lat, lon, units) {
-    const key = `f:${round(lat,2)}:${round(lon,2)}:${units}`;
-    if (!hasKey()) return demoRequest(key, TTL.forecast, 'forecast', () => Demo.forecast(lat, lon, units));
-    const url = owmURL(OWM.forecast, { lat: round(lat, 4), lon: round(lon, 4), units });
-    return request(url, { ttl: TTL.forecast, label: 'forecast', cacheKey: key });
+    const key = `f:${round(lat, 2)}:${round(lon, 2)}:${units}`;
+    try {
+      if (provider() === 'open-meteo') {
+        const res = await OpenMeteo.bundle(lat, lon, units);
+        const { forecast } = OpenMeteo.normalise(res.data, lat, lon);
+        return { ...res, data: forecast };
+      }
+      const url = owmURL(OWM.forecast, { lat: round(lat, 4), lon: round(lon, 4), units });
+      return await request(url, { ttl: TTL.forecast, label: 'forecast', cacheKey: key });
+    } catch (err) {
+      return this.fallback(err, key, TTL.forecast, 'forecast', () => Demo.forecast(lat, lon, units));
+    }
   },
 
   async air(lat, lon) {
-    const key = `a:${round(lat,2)}:${round(lon,2)}`;
-    if (!hasKey()) return demoRequest(key, TTL.air, 'air', () => Demo.air(lat, lon));
-    const url = owmURL(OWM.air, { lat: round(lat, 4), lon: round(lon, 4) });
-    return request(url, { ttl: TTL.air, label: 'air', cacheKey: key });
+    const key = `a:${round(lat, 2)}:${round(lon, 2)}`;
+    try {
+      if (provider() === 'open-meteo') return await OpenMeteo.air(lat, lon);
+      const url = owmURL(OWM.air, { lat: round(lat, 4), lon: round(lon, 4) });
+      return await request(url, { ttl: TTL.air, label: 'air', cacheKey: key });
+    } catch (err) {
+      return this.fallback(err, key, TTL.air, 'air', () => Demo.air(lat, lon));
+    }
   },
 
-  /** Geocode a free-text query. Returns a normalised array of places. */
+  /**
+   * Last line of defence. A provider outage or a dead connection must not
+   * leave an empty dashboard, so the bundled synthetic model takes over and
+   * the UI labels it clearly as demo data.
+   */
+  fallback(err, cacheKey, ttl, label, produce) {
+    Telemetry.record('provider', { lvl: 'warn', msg: `${label} failed (${err.message}); using bundled data` });
+    return demoRequest(cacheKey + ':demo', ttl, label, produce);
+  },
+
+  /** Geocode free text. Open-Meteo needs no key, so it is tried first. */
   async geocode(query, limit = 6) {
-    if (!hasKey()) return [];
+    try {
+      const results = await OpenMeteo.geocode(query, limit);
+      if (results.length || !hasKey()) return results;
+    } catch {
+      if (!hasKey()) return [];
+    }
     const url = owmURL(OWM.geoDirect, { q: query, limit });
-    const { data } = await request(url, { ttl: TTL.geo, label: 'geocode', cacheKey: `g:${query.toLowerCase()}:${limit}` });
+    const { data } = await request(url, {
+      ttl: TTL.geo, label: 'geocode', cacheKey: `g:${query.toLowerCase()}:${limit}`
+    });
     return (Array.isArray(data) ? data : []).map((r) => ({
-      name: r.name,
-      state: r.state || '',
-      country: r.country,
-      lat: r.lat,
-      lon: r.lon,
-      source: 'owm'
+      name: r.name, state: r.state || '', country: r.country,
+      lat: r.lat, lon: r.lon, source: 'owm'
     }));
   },
 
-  /** Coordinates → nearest named place, used after the browser locates you. */
+  /**
+   * Coordinates -> place name, in order of confidence:
+   *   1. the bundled Malaysian gazetteer, if a town is within 25 km — instant,
+   *      works offline, and names the place the way a Malaysian would;
+   *   2. BigDataCloud's keyless reverse geocoder, for everywhere else;
+   *   3. OpenWeatherMap's reverse endpoint, when a key is configured;
+   *   4. the raw coordinates, so the dashboard still loads.
+   */
   async reverse(lat, lon) {
-    if (!hasKey()) return nearestLocalPlace(lat, lon);
-    const url = owmURL(OWM.geoReverse, { lat: round(lat, 4), lon: round(lon, 4), limit: 1 });
-    const { data } = await request(url, { ttl: TTL.geo, label: 'reverse', cacheKey: `r:${round(lat,3)}:${round(lon,3)}` });
-    const r = Array.isArray(data) && data[0];
-    if (!r) return nearestLocalPlace(lat, lon);
-    return { name: r.name, state: r.state || '', country: r.country, lat, lon };
+    const local = nearestLocalPlace(lat, lon, 25);
+    if (local) return local;
+
+    try {
+      const url = `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${round(lat, 4)}&longitude=${round(lon, 4)}&localityLanguage=en`;
+      const { data } = await request(url, {
+        ttl: TTL.geo, label: 'reverse', cacheKey: `r:${round(lat, 3)}:${round(lon, 3)}`
+      });
+      const name = data.city || data.locality || data.principalSubdivision;
+      if (name) {
+        return { name, state: data.principalSubdivision || '', country: data.countryCode || '', lat, lon };
+      }
+    } catch { /* fall through */ }
+
+    if (hasKey()) {
+      try {
+        const url = owmURL(OWM.geoReverse, { lat: round(lat, 4), lon: round(lon, 4), limit: 1 });
+        const { data } = await request(url, {
+          ttl: TTL.geo, label: 'reverse-owm', cacheKey: `ro:${round(lat, 3)}:${round(lon, 3)}`
+        });
+        const r = Array.isArray(data) && data[0];
+        if (r) return { name: r.name, state: r.state || '', country: r.country, lat, lon };
+      } catch { /* fall through */ }
+    }
+
+    return nearestLocalPlace(lat, lon, Infinity)
+        || { name: 'Your location', state: '', country: '', lat, lon };
   }
 };
 
-/** Closest bundled Malaysian place — the offline fallback for reverse geocoding. */
-function nearestLocalPlace(lat, lon) {
+/**
+ * Closest bundled Malaysian place within `maxKm`, or null if nothing is near.
+ * This is what makes "find me" work with no network at all inside Malaysia.
+ */
+function nearestLocalPlace(lat, lon, maxKm = 60) {
   let best = null, bestD = Infinity;
   for (const p of MY_PLACES) {
     const d = haversine({ lat, lon }, p);
     if (d < bestD) { bestD = d; best = p; }
   }
-  return bestD < 60 ? { ...best } : { name: 'Selected location', state: '', country: '', lat, lon };
+  if (!best || bestD > maxKm) return null;
+  return { name: best.name, state: best.state, country: 'MY', lat, lon, distanceKm: bestD };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 06B · OPEN-METEO — the keyless default provider
+ * ---------------------------------------------------------------------------
+ * OpenWeatherMap needs an API key, which means a visitor to a public
+ * deployment would see nothing until the owner signs up. Open-Meteo needs no
+ * key, no sign-up, and sends `Access-Control-Allow-Origin: *`, so it can be
+ * called straight from the browser. It is therefore the default here, and
+ * OpenWeatherMap becomes an opt-in alternative for anyone who has a key.
+ *
+ * Every response is normalised into the same internal shape the renderers
+ * already consume, so no view code cares which provider produced the data.
+ *
+ * Endpoints (all verified by tools/api-contract.mjs on every CI run):
+ *   api.open-meteo.com/v1/forecast              current + hourly + daily
+ *   air-quality-api.open-meteo.com/v1/air-quality  pollutants
+ *   geocoding-api.open-meteo.com/v1/search      place name -> coordinates
+ *   flood-api.open-meteo.com/v1/flood           GloFAS river discharge
+ *   archive-api.open-meteo.com/v1/archive       reanalysis back to 1940
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const OM = {
+  forecast: 'https://api.open-meteo.com/v1/forecast',
+  air:      'https://air-quality-api.open-meteo.com/v1/air-quality',
+  geo:      'https://geocoding-api.open-meteo.com/v1/search',
+  reverse:  'https://geocoding-api.open-meteo.com/v1/search',
+  flood:    'https://flood-api.open-meteo.com/v1/flood',
+  archive:  'https://archive-api.open-meteo.com/v1/archive'
+};
+
+/**
+ * WMO weather interpretation codes -> the OpenWeatherMap condition vocabulary.
+ *
+ * Mapping into the shape the app already speaks means the icon table, the
+ * forecast aggregation and every template keep working untouched, whichever
+ * provider is in use.
+ */
+const WMO = {
+  0:  [800, 'Clear',        'clear sky'],
+  1:  [801, 'Clouds',       'mainly clear'],
+  2:  [802, 'Clouds',       'partly cloudy'],
+  3:  [804, 'Clouds',       'overcast'],
+  45: [741, 'Fog',          'fog'],
+  48: [741, 'Fog',          'depositing rime fog'],
+  51: [300, 'Drizzle',      'light drizzle'],
+  53: [301, 'Drizzle',      'moderate drizzle'],
+  55: [302, 'Drizzle',      'dense drizzle'],
+  56: [511, 'Drizzle',      'light freezing drizzle'],
+  57: [511, 'Drizzle',      'dense freezing drizzle'],
+  61: [500, 'Rain',         'slight rain'],
+  63: [501, 'Rain',         'moderate rain'],
+  65: [502, 'Rain',         'heavy rain'],
+  66: [511, 'Rain',         'light freezing rain'],
+  67: [511, 'Rain',         'heavy freezing rain'],
+  71: [600, 'Snow',         'slight snowfall'],
+  73: [601, 'Snow',         'moderate snowfall'],
+  75: [602, 'Snow',         'heavy snowfall'],
+  77: [601, 'Snow',         'snow grains'],
+  80: [520, 'Rain',         'slight rain showers'],
+  81: [521, 'Rain',         'moderate rain showers'],
+  82: [522, 'Rain',         'violent rain showers'],
+  85: [620, 'Snow',         'slight snow showers'],
+  86: [622, 'Snow',         'heavy snow showers'],
+  95: [200, 'Thunderstorm', 'thunderstorm'],
+  96: [201, 'Thunderstorm', 'thunderstorm with slight hail'],
+  99: [202, 'Thunderstorm', 'thunderstorm with heavy hail']
+};
+
+const wmo = (code) => {
+  const [id, main, description] = WMO[code] || [804, 'Clouds', 'cloudy'];
+  return { id, main, description };
+};
+
+/**
+ * Open-Meteo returns local wall-clock strings ("2026-08-25T07:03") together
+ * with the location's `utc_offset_seconds`. Appending Z parses the string as
+ * if it were UTC; subtracting the offset then recovers the true instant.
+ */
+const omTime = (isoLocal, offsetSeconds) =>
+  Math.round(Date.parse(isoLocal + 'Z') / 1000) - offsetSeconds;
+
+const OpenMeteo = {
+  /** Shared query parameters. Units are chosen to match OpenWeatherMap's. */
+  units(units) {
+    return units === 'imperial'
+      ? { temperature_unit: 'fahrenheit', wind_speed_unit: 'mph', precipitation_unit: 'inch' }
+      : { temperature_unit: 'celsius',    wind_speed_unit: 'ms',  precipitation_unit: 'mm' };
+  },
+
+  url(base, params) {
+    const url = new URL(base);
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
+    }
+    return url.toString();
+  },
+
+  /**
+   * One request covers current conditions, the hourly series and the daily
+   * series — so the dashboard's three panels cost a single round-trip instead
+   * of three, which is why this provider feels faster than the OWM path.
+   */
+  async bundle(lat, lon, units) {
+    const url = this.url(OM.forecast, {
+      latitude: round(lat, 4),
+      longitude: round(lon, 4),
+      current: 'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,' +
+               'weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m',
+      hourly: 'temperature_2m,relative_humidity_2m,apparent_temperature,precipitation_probability,' +
+              'precipitation,weather_code,wind_speed_10m,wind_gusts_10m,visibility,uv_index',
+      daily: 'weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max,' +
+             'precipitation_sum,precipitation_probability_max,wind_speed_10m_max,wind_gusts_10m_max',
+      timezone: 'auto',
+      forecast_days: 7,
+      ...this.units(units)
+    });
+    return request(url, {
+      ttl: TTL.weather,
+      label: 'open-meteo',
+      cacheKey: `om:${round(lat, 2)}:${round(lon, 2)}:${units}`
+    });
+  },
+
+  /** Normalise the bundle into the OpenWeatherMap-shaped payloads the UI reads. */
+  normalise(raw, lat, lon) {
+    const tz = raw.utc_offset_seconds ?? 0;
+    const c = raw.current || {};
+    const h = raw.hourly || {};
+    const d = raw.daily || {};
+
+    const nowIso = c.time;
+    // Visibility and UV live only on the hourly series, so find the row that
+    // matches the current timestamp rather than assuming index 0.
+    const hIndex = Math.max(0, (h.time || []).indexOf(nowIso));
+
+    const current = {
+      coord: { lat, lon },
+      weather: [wmo(c.weather_code)],
+      main: {
+        temp: c.temperature_2m,
+        feels_like: c.apparent_temperature,
+        temp_min: d.temperature_2m_min?.[0],
+        temp_max: d.temperature_2m_max?.[0],
+        pressure: Math.round(c.pressure_msl ?? 1010),
+        humidity: c.relative_humidity_2m
+      },
+      visibility: h.visibility?.[hIndex] ?? null,
+      wind: { speed: c.wind_speed_10m, deg: c.wind_direction_10m, gust: c.wind_gusts_10m },
+      clouds: { all: c.cloud_cover },
+      dt: nowIso ? omTime(nowIso, tz) : Math.floor(Date.now() / 1000),
+      sys: {
+        sunrise: d.sunrise?.[0] ? omTime(d.sunrise[0], tz) : null,
+        sunset:  d.sunset?.[0]  ? omTime(d.sunset[0],  tz) : null
+      },
+      timezone: tz,
+      name: '',
+      uvi: h.uv_index?.[hIndex] ?? d.uv_index_max?.[0] ?? null,
+      isDay: c.is_day === 1,
+      provider: 'open-meteo'
+    };
+
+    // Rebuild the 3-hourly list the forecast aggregator expects. Open-Meteo is
+    // hourly, so every third row is taken; nothing is interpolated.
+    const list = [];
+    const times = h.time || [];
+    for (let i = 0; i < times.length; i += 3) {
+      list.push({
+        dt: omTime(times[i], tz),
+        main: {
+          temp: h.temperature_2m?.[i],
+          feels_like: h.apparent_temperature?.[i],
+          temp_min: h.temperature_2m?.[i],
+          temp_max: h.temperature_2m?.[i],
+          humidity: h.relative_humidity_2m?.[i],
+          pressure: Math.round(c.pressure_msl ?? 1010)
+        },
+        weather: [wmo(h.weather_code?.[i])],
+        clouds: { all: c.cloud_cover },
+        wind: { speed: h.wind_speed_10m?.[i], deg: c.wind_direction_10m, gust: h.wind_gusts_10m?.[i] },
+        pop: (h.precipitation_probability?.[i] ?? 0) / 100,
+        rain: h.precipitation?.[i] ?? 0,
+        visibility: h.visibility?.[i] ?? null,
+        uvi: h.uv_index?.[i] ?? null
+      });
+    }
+
+    return {
+      current,
+      forecast: {
+        list,
+        city: { timezone: tz },
+        // The daily arrays are kept verbatim: the hazard engine reads real
+        // daily precipitation totals from them rather than re-deriving totals
+        // from 3-hourly samples, which would understate them.
+        om_daily: d,
+        om_hourly: h,
+        om_offset: tz
+      }
+    };
+  },
+
+  async air(lat, lon) {
+    const url = this.url(OM.air, {
+      latitude: round(lat, 4),
+      longitude: round(lon, 4),
+      current: 'pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,us_aqi,european_aqi',
+      hourly: 'pm2_5,pm10',
+      past_days: 1,
+      forecast_days: 1,
+      timezone: 'auto'
+    });
+    const res = await request(url, {
+      ttl: TTL.air, label: 'open-meteo-air', cacheKey: `oma:${round(lat, 2)}:${round(lon, 2)}`
+    });
+    const c = res.data.current || {};
+    const h = res.data.hourly || {};
+
+    return {
+      ...res,
+      data: {
+        list: [{
+          main: { aqi: euAqiToBand(c.european_aqi) },
+          components: {
+            pm2_5: c.pm2_5, pm10: c.pm10, o3: c.ozone,
+            no2: c.nitrogen_dioxide, so2: c.sulphur_dioxide, co: c.carbon_monoxide
+          }
+        }],
+        // 24-hour means are what the Malaysian index is defined on.
+        pm25_24h: mean24(h.pm2_5),
+        pm10_24h: mean24(h.pm10),
+        us_aqi: c.us_aqi,
+        provider: 'open-meteo'
+      }
+    };
+  },
+
+  async geocode(query, limit = 6) {
+    const url = this.url(OM.geo, { name: query, count: limit, language: 'en', format: 'json' });
+    const { data } = await request(url, {
+      ttl: TTL.geo, label: 'open-meteo-geo', cacheKey: `omg:${query.toLowerCase()}:${limit}`
+    });
+    return (data.results || []).map((r) => ({
+      name: r.name,
+      state: r.admin1 || '',
+      country: r.country_code,
+      countryName: r.country,
+      lat: r.latitude,
+      lon: r.longitude,
+      population: r.population,
+      source: 'open-meteo'
+    }));
+  },
+
+  /**
+   * GloFAS river discharge for the nearest modelled river reach. Comparing
+   * today's forecast discharge against the 92-day distribution gives a usable
+   * relative flood signal without needing a gauge network.
+   */
+  async flood(lat, lon) {
+    const url = this.url(OM.flood, {
+      latitude: round(lat, 3),
+      longitude: round(lon, 3),
+      daily: 'river_discharge,river_discharge_mean,river_discharge_median,river_discharge_max',
+      forecast_days: 92
+    });
+    return request(url, {
+      ttl: 6 * 60 * 60 * 1000, label: 'open-meteo-flood',
+      cacheKey: `omf:${round(lat, 2)}:${round(lon, 2)}`
+    });
+  },
+
+  /** Daily reanalysis, used to compute a real local climate normal. */
+  async archive(lat, lon, startDate, endDate) {
+    const url = this.url(OM.archive, {
+      latitude: round(lat, 3),
+      longitude: round(lon, 3),
+      start_date: startDate,
+      end_date: endDate,
+      daily: 'temperature_2m_mean,temperature_2m_max,precipitation_sum',
+      timezone: 'auto'
+    });
+    // Thirty years of daily rows is a large payload, so it bypasses the shared
+    // response cache (which lives in localStorage) and is stored in IndexedDB
+    // by the caller instead.
+    const { data } = await fetchJSON(url, { label: 'open-meteo-archive', timeout: 45000, retries: 1 });
+    return data;
+  }
+};
+
+/** Mean of the trailing 24 values of an hourly series. */
+function mean24(series) {
+  if (!Array.isArray(series) || !series.length) return null;
+  const tail = series.slice(-24).filter((v) => typeof v === 'number');
+  return tail.length ? tail.reduce((a, b) => a + b, 0) / tail.length : null;
+}
+
+/** European AQI (0-100+) collapsed onto the 1-5 band the AQI card was built for. */
+function euAqiToBand(v) {
+  if (v === null || v === undefined) return null;
+  if (v <= 20) return 1;
+  if (v <= 40) return 2;
+  if (v <= 60) return 3;
+  if (v <= 80) return 4;
+  return 5;
+}
+
+/* ── Malaysian Air Pollutant Index ────────────────────────────────────────────
+ * Malaysia does not use the US or European AQI. The Department of Environment
+ * publishes an Air Pollutant Index on a 0-500 scale, computed as a piecewise
+ * linear sub-index per pollutant on a 24-hour running mean, with the highest
+ * sub-index becoming the reported API.
+ *
+ * PM2.5 became the dominant indicator in 2020, so it and PM10 are computed
+ * here. This is a modelled estimate from Open-Meteo's reanalysis, not a
+ * reading from a DOE monitoring station — the UI says so.
+ * ------------------------------------------------------------------------- */
+
+const API_PM25_BREAKS = [
+  [0,     12.0,   0,   50],
+  [12.1,  35.4,  51,  100],
+  [35.5,  55.4, 101,  200],
+  [55.5, 150.4, 201,  300],
+  [150.5, 250.4, 301, 400],
+  [250.5, 500.4, 401, 500]
+];
+
+const API_PM10_BREAKS = [
+  [0,    50,    0,   50],
+  [51,  150,   51,  100],
+  [151, 350,  101,  200],
+  [351, 420,  201,  300],
+  [421, 500,  301,  400],
+  [501, 600,  401,  500]
+];
+
+function subIndex(concentration, breaks) {
+  if (concentration === null || concentration === undefined || Number.isNaN(concentration)) return null;
+  for (const [cLo, cHi, iLo, iHi] of breaks) {
+    if (concentration <= cHi) {
+      return Math.round(iLo + ((iHi - iLo) / (cHi - cLo)) * (concentration - cLo));
+    }
+  }
+  return 500;
+}
+
+const MY_API_BANDS = [
+  { max: 50,  label: 'Good',           tone: 'good',
+    note: 'Low pollution with no ill effects on health.' },
+  { max: 100, label: 'Moderate',       tone: 'ok',
+    note: 'Moderate pollution. No ill effects for the general population.' },
+  { max: 200, label: 'Unhealthy',      tone: 'warn',
+    note: 'Mild aggravation for people with heart or lung conditions. Limit prolonged outdoor exertion.' },
+  { max: 300, label: 'Very unhealthy', tone: 'bad',
+    note: 'Significant aggravation and reduced tolerance to exercise. Avoid outdoor activity; wear a mask outdoors.' },
+  { max: Infinity, label: 'Hazardous', tone: 'severe',
+    note: 'Serious risk to everyone. Stay indoors, seal windows, and follow official haze advisories.' }
+];
+
+/** Returns { value, label, tone, note, driver } or null when no data. */
+function malaysianAPI(pm25, pm10) {
+  const s25 = subIndex(pm25, API_PM25_BREAKS);
+  const s10 = subIndex(pm10, API_PM10_BREAKS);
+  if (s25 === null && s10 === null) return null;
+  const value = Math.max(s25 ?? 0, s10 ?? 0);
+  const band = MY_API_BANDS.find((b) => value <= b.max);
+  return {
+    value,
+    label: band.label,
+    tone: band.tone,
+    note: band.note,
+    driver: (s25 ?? -1) >= (s10 ?? -1) ? 'PM2.5' : 'PM10'
+  };
 }
 
 /* ── Demo engine ──────────────────────────────────────────────────────────────
@@ -937,6 +1393,9 @@ const Demo = {
         clouds: { all: storm ? 90 : 45 },
         wind: { speed: units === 'imperial' ? 5 + r * 5 : 2 + r * 2.4, deg: Math.round(r * 360) },
         pop: storm ? 0.7 + r * 0.25 : r * 0.4,
+        // Rainfall has to track the probability, or the offline estimate
+        // reports an 85% chance of rain alongside a 0 mm total.
+        rain: storm ? round(8 + r * 22, 1) : r > 0.6 ? round(r * 6, 1) : 0,
         visibility: storm ? 4000 : 10000
       });
     }
@@ -1316,9 +1775,14 @@ const isValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(String(v).trim(
 const defaultSettings = {
   units: 'metric',
   theme: 'dark',
-  home: 'last',
+  home: 'geo',            // detect the visitor's location on arrival
+  provider: 'auto',       // 'auto' | 'open-meteo' | 'owm'
   analytics: true,
-  reduceMotion: false
+  reduceMotion: false,
+  alertsEnabled: true,
+  alertMinSeverity: 3,    // 1 info · 2 advisory · 3 warning · 4 danger
+  alertSound: true,
+  notifications: false    // only ever true after the user grants permission
 };
 
 const state = {
@@ -1334,7 +1798,14 @@ const state = {
   hourlySeries: 'temp',
   selectedDay: null,
   loading: false,
-  source: 'live'      // 'live' | 'cache' | 'demo'
+  source: 'live',     // 'live' | 'cache' | 'demo'
+  providerUsed: '',
+  hazards: [],        // ranked alerts from the hazard engine
+  quakes: [],         // raw USGS features, for the alerts view
+  flood: null,        // GloFAS river-discharge assessment
+  airIndex: null,     // Malaysian Air Pollutant Index
+  climate: null,      // computed local climate normal
+  seenHazards: new Set()
 };
 
 let activeView = 'dashboard';
@@ -1348,7 +1819,10 @@ function loadSettings() {
 function saveSettings() {
   safeLocal.set(LS.settings, JSON.stringify({
     units: state.units, theme: state.theme, home: state.home,
-    analytics: state.analytics, reduceMotion: state.reduceMotion
+    provider: state.provider, analytics: state.analytics,
+    reduceMotion: state.reduceMotion, alertsEnabled: state.alertsEnabled,
+    alertMinSeverity: state.alertMinSeverity, alertSound: state.alertSound,
+    notifications: state.notifications
   }));
 }
 
@@ -1404,11 +1878,17 @@ async function loadPlace(place, { silent = false } = {}) {
 
   state.current = cur.value.data;
   state.source = cur.value.demo ? 'demo' : cur.value.fromCache ? 'cache' : 'live';
+  state.providerUsed = cur.value.data?.provider || (cur.value.demo ? 'bundled' : provider());
   state.forecast = fc.status === 'fulfilled' ? fc.value.data : null;
   state.air = air.status === 'fulfilled' ? air.value.data : null;
 
   deriveSeries();
+  state.airIndex = computeAirIndex();
   renderAll();
+
+  // The hazard sweep makes its own network calls, so it runs after the
+  // dashboard has already painted rather than delaying it.
+  runHazards();
 
   Telemetry.place(place.name);
   Telemetry.record('view', { lvl: 'info', msg: `${place.name} rendered in ${fmt.ms(performance.now() - started)}` });
@@ -1416,7 +1896,7 @@ async function loadPlace(place, { silent = false } = {}) {
 
   safeLocal.set(LS.lastPlace, JSON.stringify(place));
   setStatus('Ready');
-  if (state.source === 'demo') $('#banner-setup').hidden = false;
+  $('#banner-setup').hidden = state.source !== 'demo';
 }
 
 function showError(err) {
@@ -1481,12 +1961,34 @@ function deriveSeries() {
       pop: Math.max(...slots.map((s) => s.pop ?? 0)),
       humidity: Math.round(slots.reduce((a, s) => a + s.main.humidity, 0) / slots.length),
       wind: Math.max(...slots.map((s) => s.wind?.speed ?? 0)),
+      // Summing 3-hourly samples understates a daily total, so the provider's
+      // own daily figures are preferred and only derived as a fallback.
+      precipMm: sumPrecip(slots),
+      gustKmh: maxGust(slots),
+      uvMax: Math.max(0, ...slots.map((s) => s.uvi ?? 0)) || null,
       slots,
       tz
     });
   }
 
   state.daily = state.daily.slice(0, 5);
+
+  // Open-Meteo returns real daily aggregates; use them in preference to the
+  // values reduced from 3-hourly slots above.
+  const omd = state.forecast.om_daily;
+  if (omd?.time?.length) {
+    const off = state.forecast.om_offset ?? 0;
+    for (const d of state.daily) {
+      const i = omd.time.findIndex((t) => Math.floor((omTime(t + 'T12:00', off) + off) / 86400) === d.day);
+      if (i < 0) continue;
+      if (typeof omd.precipitation_sum?.[i] === 'number')  d.precipMm = omd.precipitation_sum[i];
+      if (typeof omd.wind_gusts_10m_max?.[i] === 'number') d.gustKmh = omd.wind_gusts_10m_max[i] * (state.units === 'imperial' ? 1.609 : 3.6);
+      if (typeof omd.uv_index_max?.[i] === 'number')       d.uvMax = omd.uv_index_max[i];
+      if (typeof omd.precipitation_probability_max?.[i] === 'number') d.pop = omd.precipitation_probability_max[i] / 100;
+      if (typeof omd.temperature_2m_max?.[i] === 'number') d.max = omd.temperature_2m_max[i];
+      if (typeof omd.temperature_2m_min?.[i] === 'number') d.min = omd.temperature_2m_min[i];
+    }
+  }
 
   const now = Math.floor(Date.now() / 1000);
   state.hourly = state.forecast.list
@@ -1497,6 +1999,8 @@ function deriveSeries() {
       temp: s.main.temp,
       pop: (s.pop ?? 0) * 100,
       wind: state.units === 'imperial' ? s.wind.speed : s.wind.speed * 3.6,
+      rainMm: precipOf(s),
+      uvi: s.uvi ?? null,
       id: s.weather[0].id
     }));
 
@@ -1508,6 +2012,23 @@ function deriveSeries() {
     d.barLeft = ((d.min - allMin) / span) * 100;
     d.barWidth = Math.max(8, ((d.max - d.min) / span) * 100);
   }
+}
+
+/** Precipitation in mm for one forecast slot, across both provider shapes. */
+function precipOf(slot) {
+  if (typeof slot.rain === 'number') return slot.rain;            // Open-Meteo
+  if (slot.rain && typeof slot.rain['3h'] === 'number') return slot.rain['3h'];  // OWM
+  if (slot.snow && typeof slot.snow['3h'] === 'number') return slot.snow['3h'];
+  return 0;
+}
+
+const sumPrecip = (slots) => slots.reduce((a, s) => a + precipOf(s), 0);
+
+/** Peak gust for a day, in km/h (or mph when imperial units are selected). */
+function maxGust(slots) {
+  const speeds = slots.map((s) => s.wind?.gust ?? s.wind?.speed ?? 0);
+  const peak = Math.max(0, ...speeds);
+  return state.units === 'imperial' ? peak : peak * 3.6;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1522,6 +2043,7 @@ function renderAll() {
   renderHourly();
   renderForecast();
   renderSavedList();
+  renderAssistant();
 }
 
 function renderPlaceHeader() {
@@ -1576,7 +2098,11 @@ function renderCurrent() {
 
   $('#cur-updated').textContent = fmt.relative(c.dt * 1000);
   const tag = $('#cur-source');
-  tag.textContent = state.source === 'demo' ? 'Demo data' : state.source === 'cache' ? 'Cached' : 'Live';
+  const providerName = state.providerUsed === 'open-meteo' ? 'Open-Meteo'
+                     : state.providerUsed === 'owm' ? 'OpenWeatherMap' : 'bundled model';
+  tag.textContent = state.source === 'demo' ? 'Offline estimate'
+                  : state.source === 'cache' ? `Cached · ${providerName}`
+                  : `Live · ${providerName}`;
   tag.dataset.kind = state.source === 'demo' ? 'demo' : state.source === 'cache' ? 'cache' : 'live';
 }
 
@@ -1624,12 +2150,23 @@ function renderAir() {
     return;
   }
 
-  const aqi = entry.main.aqi;
-  const scale = AQI_SCALE[aqi] || AQI_SCALE[3];
-  badge.dataset.level = String(aqi);
-  $('#aqi-score').textContent = String(aqi);
-  $('#aqi-label').textContent = scale.label;
-  $('#aqi-note').textContent = scale.note;
+  // Malaysia publishes its own 0-500 Air Pollutant Index rather than using the
+  // US or European scale, so that is what is shown when we can compute it.
+  const my = state.airIndex;
+  if (my) {
+    badge.dataset.level = my.value > 300 ? '5' : my.value > 200 ? '4'
+                        : my.value > 100 ? '3' : my.value > 50 ? '2' : '1';
+    $('#aqi-score').textContent = String(my.value);
+    $('#aqi-label').textContent = `API · ${my.label}`;
+    $('#aqi-note').textContent = `${my.note} Driven by ${my.driver}. Modelled estimate, not a DOE station reading.`;
+  } else {
+    const aqi = entry.main.aqi;
+    const scale = AQI_SCALE[aqi] || AQI_SCALE[3];
+    badge.dataset.level = String(aqi);
+    $('#aqi-score').textContent = String(aqi);
+    $('#aqi-label').textContent = scale.label;
+    $('#aqi-note').textContent = scale.note;
+  }
 
   const labels = {
     pm2_5: 'PM2.5', pm10: 'PM10', o3: 'Ozone',
@@ -2345,7 +2882,7 @@ const Search = {
     const locals = this.local(query);
     this.render(locals, []);
 
-    if (query.trim().length < 3 || !hasKey()) return;
+    if (query.trim().length < 3) return;
 
     $('#search-spinner').hidden = false;
     try {
@@ -2406,7 +2943,7 @@ const Search = {
     if (!locals.length && !remote.length) {
       host.appendChild(el('li', {
         className: 'search__group',
-        textContent: hasKey() ? 'No matching places found.' : 'No Malaysian match. Add an API key to search worldwide.',
+        textContent: 'No matching places found.',
         attrs: { role: 'presentation' }
       }));
     }
@@ -2581,10 +3118,1378 @@ function downloadJSON(filename, payload) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * 25 · MONSOON & SEASON
+ * ---------------------------------------------------------------------------
+ * Malaysia has no four-season year. Its climate is organised around two
+ * monsoons separated by two inter-monsoon transitions, and which one is
+ * running is the single best predictor of whether a given state is about to
+ * flood. This is a calendar fact, not a forecast, so it is computed locally
+ * with no network call.
+ *
+ * Northeast monsoon   Nov - Mar   the main rainy season; the east coast of the
+ *                                 peninsula, western Sarawak and north-east
+ *                                 Sabah take the heaviest, most persistent rain
+ * First inter-monsoon Apr - May   light winds, intense convective afternoon
+ *                                 thunderstorms and squall lines
+ * Southwest monsoon   Jun - Sep   the driest spell for most of the country;
+ *                                 the haze season, when smoke from regional
+ *                                 land clearing is carried in
+ * Second inter-monsoon Oct        thunderstorms return ahead of the northeast
+ *                                 monsoon's onset
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/** States that bear the brunt of each phase. */
+const MONSOON = {
+  northeast: {
+    name: 'Northeast monsoon',
+    malay: 'Monsun Timur Laut',
+    window: 'November – March',
+    summary: 'Malaysia’s main rainy season. Persistent heavy rain arrives on winds off the South China Sea, and monsoon surges can produce several days of continuous rainfall.',
+    watch: ['KTN', 'TRG', 'PHG', 'JHR', 'SWK', 'SBH'],
+    risks: ['Seasonal river flooding on the east coast', 'Monsoon surges lasting several days',
+            'Rough seas and disrupted ferry services', 'Landslides on saturated slopes']
+  },
+  interNorth: {
+    name: 'First inter-monsoon',
+    malay: 'Peralihan Monsun',
+    window: 'April – May',
+    summary: 'Winds are light and variable. Heat builds through the day and releases as sharp afternoon and evening thunderstorms, often with damaging gusts.',
+    watch: ['KUL', 'SGR', 'PRK', 'PNG', 'NSN', 'MLK'],
+    risks: ['Intense afternoon thunderstorms', 'Flash flooding in urban drainage',
+            'Squall lines with sudden strong winds', 'Lightning risk for outdoor work']
+  },
+  southwest: {
+    name: 'Southwest monsoon',
+    malay: 'Monsun Barat Daya',
+    window: 'June – September',
+    summary: 'The driest stretch for most of the country. Sumatra squalls sweep the west coast in the early morning, and this is the season when regional haze is most likely.',
+    watch: ['PNG', 'PRK', 'KDH', 'SGR', 'MLK', 'JHR'],
+    risks: ['Transboundary haze and poor air quality', 'Sumatra squalls before dawn on the west coast',
+            'Dry spells and elevated fire risk', 'Water supply stress in a prolonged dry period']
+  },
+  interSouth: {
+    name: 'Second inter-monsoon',
+    malay: 'Peralihan Monsun',
+    window: 'October – early November',
+    summary: 'The transition into the northeast monsoon. Thunderstorm activity picks up again nationwide as the wind reverses.',
+    watch: ['KUL', 'SGR', 'PHG', 'KTN', 'TRG', 'SWK'],
+    risks: ['Frequent afternoon thunderstorms', 'Early-season flash flooding',
+            'Rapidly changing conditions day to day']
+  }
+};
+
+/** Which monsoon phase a date falls in. */
+function monsoonPhase(date = new Date()) {
+  const m = date.getMonth() + 1;
+  if (m >= 11 || m <= 3) return { key: 'northeast', ...MONSOON.northeast };
+  if (m === 4 || m === 5) return { key: 'interNorth', ...MONSOON.interNorth };
+  if (m >= 6 && m <= 9) return { key: 'southwest', ...MONSOON.southwest };
+  return { key: 'interSouth', ...MONSOON.interSouth };
+}
+
+/** Is the current place in a state this monsoon phase hits hardest? */
+function monsoonAffectsPlace(phase, place) {
+  if (!place || place.country !== 'MY') return false;
+  const code = Object.keys(MY_STATES).find((c) => MY_STATES[c] === place.state);
+  return code ? phase.watch.includes(code) : false;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 26 · HAZARD ENGINE
+ * ---------------------------------------------------------------------------
+ * Turns raw numbers into ranked, actionable alerts. Every threshold below is
+ * sourced rather than invented, and each alert carries the reading that
+ * triggered it so a reader can check the reasoning:
+ *
+ *   Rainfall   MetMalaysia's continuous-rain warning bands — Waspada above
+ *              60 mm/24 h, Buruk above 150 mm/24 h, Bahaya above 250 mm/24 h.
+ *   Storms     MetMalaysia issues a thunderstorm warning at 20 mm/hour.
+ *   Heat       MetMalaysia's heatwave levels on daily maximum temperature:
+ *              35-37 °C, 37-40 °C, and above 40 °C.
+ *   Air        The Malaysian DOE Air Pollutant Index bands (see section 06B).
+ *   Flood      GloFAS river discharge against its own 92-day distribution.
+ *   Quakes     USGS magnitude, distance, tsunami flag and PAGER alert level.
+ *
+ * Severity 1 information · 2 advisory · 3 warning · 4 danger.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const SEVERITY_LABEL = { 1: 'Information', 2: 'Advisory', 3: 'Warning', 4: 'Danger' };
+const SEVERITY_TONE  = { 1: 'info', 2: 'ok', 3: 'warn', 4: 'severe' };
+
+const Hazards = {
+  /** Build the full alert set for the current place. Never throws. */
+  async assess(place) {
+    const alerts = [];
+    try { alerts.push(...this.fromRainfall()); }  catch (e) { this.oops('rainfall', e); }
+    try { alerts.push(...this.fromStorms()); }    catch (e) { this.oops('storms', e); }
+    try { alerts.push(...this.fromWind()); }      catch (e) { this.oops('wind', e); }
+    try { alerts.push(...this.fromHeat()); }      catch (e) { this.oops('heat', e); }
+    try { alerts.push(...this.fromUV()); }        catch (e) { this.oops('uv', e); }
+    try { alerts.push(...this.fromAir()); }       catch (e) { this.oops('air', e); }
+
+    // The two network-backed sources run together and never block each other.
+    const [flood, quakes] = await Promise.allSettled([
+      this.fromFlood(place),
+      this.fromQuakes(place)
+    ]);
+    if (flood.status === 'fulfilled') alerts.push(...flood.value);
+    if (quakes.status === 'fulfilled') alerts.push(...quakes.value);
+
+    alerts.push(...this.fromMonsoon(place));
+
+    // Most severe first, then soonest.
+    alerts.sort((a, b) => b.severity - a.severity || (a.whenTs || 0) - (b.whenTs || 0));
+    return alerts;
+  },
+
+  oops(source, err) {
+    Telemetry.record('hazard', { lvl: 'warn', msg: `${source} check failed: ${err.message}` });
+  },
+
+  alert(o) {
+    return {
+      id: o.id, kind: o.kind, severity: o.severity,
+      title: o.title, detail: o.detail, advice: o.advice,
+      when: o.when || 'Now', whenTs: o.whenTs || Date.now(),
+      source: o.source, link: o.link || null, reading: o.reading || ''
+    };
+  },
+
+  /** Daily rainfall totals against MetMalaysia's continuous-rain bands. */
+  fromRainfall() {
+    const out = [];
+    for (const d of state.daily.slice(0, 5)) {
+      const mm = d.precipMm;
+      if (mm === null || mm === undefined) continue;
+
+      let severity = 0, band = '';
+      if (mm >= 250)      { severity = 4; band = 'Bahaya (danger)'; }
+      else if (mm >= 150) { severity = 3; band = 'Buruk (bad)'; }
+      else if (mm >= 60)  { severity = 2; band = 'Waspada (alert)'; }
+      if (!severity) continue;
+
+      const day = fmt.dayName(d.dt, d.tz, true);
+      out.push(this.alert({
+        id: `rain:${d.day}`,
+        kind: 'rain',
+        severity,
+        title: `Heavy rain expected — ${band}`,
+        detail: `${Math.round(mm)} mm of rain is forecast for ${day}, ${fmt.dayDate(d.dt, d.tz)}. ` +
+                `MetMalaysia issues a continuous-rain warning at this level.`,
+        advice: severity >= 4
+          ? 'Extreme flood risk. Move vehicles and valuables to higher ground now, keep documents and medication in a grab bag, and follow evacuation instructions.'
+          : severity === 3
+            ? 'Significant flood risk. Avoid low-lying roads and river crossings, and prepare to move valuables up a floor.'
+            : 'Localised flash flooding is possible. Allow extra travel time and avoid parking beside drains or rivers.',
+        when: day,
+        whenTs: d.dt * 1000,
+        reading: `${Math.round(mm)} mm / 24 h`,
+        source: 'Forecast rainfall vs MetMalaysia warning bands'
+      }));
+    }
+    return out;
+  },
+
+  /** Thunderstorms and intense short-duration rain in the next 12 hours. */
+  fromStorms() {
+    const out = [];
+    const soon = state.hourly.filter((h) => h.dt * 1000 < Date.now() + 12 * 3600 * 1000);
+
+    const storm = soon.find((h) => Math.floor(h.id / 100) === 2);
+    if (storm) {
+      out.push(this.alert({
+        id: `storm:${storm.dt}`,
+        kind: 'storm',
+        severity: 2,
+        title: 'Thunderstorms forecast',
+        detail: `Thunderstorms are expected around ${fmt.clock(storm.dt, storm.tz)}. ` +
+                'Malaysian storms build fast and bring lightning, sudden gusts and brief intense rain.',
+        advice: 'Finish outdoor work early. If you hear thunder, go indoors — a substantial building or a hard-topped vehicle, not a shelter or a tree.',
+        when: fmt.clock(storm.dt, storm.tz),
+        whenTs: storm.dt * 1000,
+        reading: 'Thunderstorm in the hourly model',
+        source: 'Hourly weather codes'
+      }));
+    }
+
+    const intense = soon.find((h) => (h.rainMm ?? 0) >= 20);
+    if (intense) {
+      out.push(this.alert({
+        id: `downpour:${intense.dt}`,
+        kind: 'rain',
+        severity: 3,
+        title: 'Intense downpour expected',
+        detail: `About ${Math.round(intense.rainMm)} mm of rain is forecast within a single hour around ` +
+                `${fmt.clock(intense.dt, intense.tz)}. MetMalaysia's thunderstorm warning threshold is 20 mm/hour.`,
+        advice: 'Urban drains overwhelm quickly at this rate. Avoid underpasses and basement car parks, and do not drive through moving water.',
+        when: fmt.clock(intense.dt, intense.tz),
+        whenTs: intense.dt * 1000,
+        reading: `${Math.round(intense.rainMm)} mm / h`,
+        source: 'Hourly precipitation'
+      }));
+    }
+    return out;
+  },
+
+  fromWind() {
+    const out = [];
+    for (const d of state.daily.slice(0, 3)) {
+      const gust = d.gustKmh;
+      if (!gust) continue;
+      let severity = 0;
+      if (gust >= 120)     severity = 4;
+      else if (gust >= 90) severity = 3;
+      else if (gust >= 60) severity = 2;
+      if (!severity) continue;
+
+      out.push(this.alert({
+        id: `wind:${d.day}`,
+        kind: 'wind',
+        severity,
+        title: 'Damaging wind gusts possible',
+        detail: `Gusts to ${Math.round(gust)} km/h are forecast for ${fmt.dayName(d.dt, d.tz, true)}.`,
+        advice: 'Secure loose items, awnings and scaffolding. Take care under trees and near hoardings, and expect sea and river crossings to be rough.',
+        when: fmt.dayName(d.dt, d.tz),
+        whenTs: d.dt * 1000,
+        reading: `${Math.round(gust)} km/h gusts`,
+        source: 'Forecast wind gusts'
+      }));
+      break;      // one wind alert is enough
+    }
+    return out;
+  },
+
+  /** MetMalaysia heatwave levels, on daily maximum temperature in °C. */
+  fromHeat() {
+    const out = [];
+    const toC = (v) => (state.units === 'imperial' ? (v - 32) * 5 / 9 : v);
+    for (const d of state.daily.slice(0, 3)) {
+      const maxC = toC(d.max);
+      let severity = 0, level = '';
+      if (maxC >= 40)      { severity = 4; level = 'Level 3'; }
+      else if (maxC >= 37) { severity = 3; level = 'Level 2'; }
+      else if (maxC >= 35) { severity = 2; level = 'Level 1'; }
+      if (!severity) continue;
+
+      out.push(this.alert({
+        id: `heat:${d.day}`,
+        kind: 'heat',
+        severity,
+        title: `Heat stress — ${level} conditions`,
+        detail: `A maximum of ${fmt.temp(d.max, true)} is forecast for ${fmt.dayName(d.dt, d.tz, true)}. ` +
+                'Malaysia’s humidity means the body sheds heat far less efficiently than the air temperature suggests.',
+        advice: severity >= 3
+          ? 'Avoid outdoor exertion between 11am and 4pm. Drink water before you feel thirsty, and check on elderly neighbours and anyone working outdoors.'
+          : 'Keep water with you, take shade breaks, and move strenuous activity to early morning or evening.',
+        when: fmt.dayName(d.dt, d.tz),
+        whenTs: d.dt * 1000,
+        reading: `${fmt.temp(d.max, true)} maximum`,
+        source: 'Forecast maximum vs MetMalaysia heatwave levels'
+      }));
+      break;
+    }
+    return out;
+  },
+
+  fromUV() {
+    const uv = state.daily[0]?.uvMax;
+    if (!uv || uv < 8) return [];
+    return [this.alert({
+      id: `uv:${state.daily[0].day}`,
+      kind: 'uv',
+      severity: uv >= 11 ? 2 : 1,
+      title: uv >= 11 ? 'Extreme UV today' : 'Very high UV today',
+      detail: `The UV index peaks near ${Math.round(uv)} today. Malaysia sits close to the equator, so ` +
+              'midday sun is intense all year, cloud cover included.',
+      advice: uv >= 11
+        ? 'Unprotected skin can burn in under 15 minutes. Stay in shade around midday, and use a hat, sunglasses and SPF 50+.'
+        : 'Use SPF 30+ and seek shade between 11am and 3pm.',
+      reading: `UV index ${Math.round(uv)}`,
+      source: 'Forecast UV index'
+    })];
+  },
+
+  fromAir() {
+    const idx = state.airIndex;
+    if (!idx || idx.value <= 100) return [];
+    const severity = idx.value > 300 ? 4 : idx.value > 200 ? 3 : 2;
+    return [this.alert({
+      id: `air:${Math.round(idx.value / 10)}`,
+      kind: 'haze',
+      severity,
+      title: `Air quality ${idx.label.toLowerCase()} — API ${idx.value}`,
+      detail: `${idx.note} The index is driven by ${idx.driver}.`,
+      advice: severity >= 3
+        ? 'Stay indoors with windows closed, run an air purifier if you have one, and wear an N95 outdoors — a surgical or cloth mask does not filter smoke particles.'
+        : 'People with asthma or heart conditions should limit outdoor exertion and keep reliever medication to hand.',
+      reading: `API ${idx.value} (${idx.driver})`,
+      source: 'Malaysian DOE index computed from modelled PM2.5 and PM10'
+    })];
+  },
+
+  /**
+   * GloFAS river discharge. An absolute figure means little without local
+   * context, so today's value is judged against its own 92-day distribution
+   * for this reach: a river running well above its own median is the signal.
+   */
+  async fromFlood(place) {
+    if (!place) return [];
+    const res = await OpenMeteo.flood(place.lat, place.lon);
+    const d = res.data?.daily;
+    if (!d?.river_discharge?.length) return [];
+
+    const series = d.river_discharge.filter((v) => typeof v === 'number');
+    if (!series.length) return [];
+
+    const today = series[0];
+    const median = percentile(series, 0.5) || 0;
+    const p90 = percentile(series, 0.9) || 0;
+    const peak = Math.max(...series.slice(0, 10));
+    const peakIndex = series.slice(0, 10).indexOf(peak);
+
+    state.flood = { today, median, p90, peak, peakIndex, series, dates: d.time };
+
+    // Tiny headwater reaches produce large ratios from noise, so an absolute
+    // floor is required before any of this is reported as a hazard.
+    if (peak < 5 || !median) return [];
+
+    const ratio = peak / median;
+    let severity = 0;
+    if (ratio >= 4 && peak >= p90)      severity = 3;
+    else if (ratio >= 2.5)              severity = 2;
+    else if (ratio >= 1.8)              severity = 1;
+    if (!severity) return [];
+
+    const when = d.time?.[peakIndex];
+    return [this.alert({
+      id: `flood:${when}`,
+      kind: 'flood',
+      severity,
+      title: 'River levels rising nearby',
+      detail: `The modelled river discharge near this location peaks at ${round(peak, 1)} m³/s ` +
+              `${peakIndex === 0 ? 'today' : `in ${peakIndex} day${peakIndex === 1 ? '' : 's'}`}, ` +
+              `about ${round(ratio, 1)}× its 90-day median of ${round(median, 1)} m³/s.`,
+      advice: severity >= 3
+        ? 'Treat this as an early warning, not a forecast of your street. Check JPS InfoBanjir for gauge readings on your river, and move valuables up a floor if you are in a known flood area.'
+        : 'Worth watching if you live near a river. Compare against JPS InfoBanjir, which reports actual gauge levels.',
+      when: when || 'Next 10 days',
+      whenTs: when ? Date.parse(when) : Date.now(),
+      reading: `${round(peak, 1)} m³/s vs ${round(median, 1)} median`,
+      link: 'https://publicinfobanjir.water.gov.my/',
+      source: 'Copernicus GloFAS via Open-Meteo'
+    })];
+  },
+
+  /**
+   * Earthquakes near the location in the last week.
+   *
+   * Peninsular Malaysia is seismically quiet, but Sabah is not — the 2015
+   * Ranau earthquake killed 18 people — and the Sumatran subduction zone to
+   * the west is capable of tsunamigenic events that reach Malaysian coasts.
+   */
+  async fromQuakes(place) {
+    if (!place) return [];
+    const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+    const url = 'https://earthquake.usgs.gov/fdsnws/event/1/query?' + new URLSearchParams({
+      format: 'geojson',
+      latitude: round(place.lat, 3),
+      longitude: round(place.lon, 3),
+      maxradiuskm: 2000,
+      starttime: since,
+      minmagnitude: 4.5,
+      orderby: 'time',
+      limit: 40
+    });
+
+    const { data } = await request(url, {
+      ttl: 15 * 60 * 1000, label: 'usgs',
+      cacheKey: `eq:${round(place.lat, 1)}:${round(place.lon, 1)}`
+    });
+
+    const features = (data.features || []).map((f) => {
+      const [lon, lat, depth] = f.geometry.coordinates;
+      return {
+        id: f.id,
+        mag: f.properties.mag,
+        place: f.properties.place,
+        time: f.properties.time,
+        url: f.properties.url,
+        tsunami: f.properties.tsunami === 1,
+        alert: f.properties.alert,
+        sig: f.properties.sig,
+        depth,
+        lat, lon,
+        distanceKm: haversine({ lat: place.lat, lon: place.lon }, { lat, lon })
+      };
+    }).sort((a, b) => a.distanceKm - b.distanceKm);
+
+    state.quakes = features;
+
+    const out = [];
+    for (const q of features) {
+      // Ground motion falls off with distance; these pairings approximate
+      // where a quake of a given size is actually felt.
+      const notable =
+        (q.mag >= 5.0 && q.distanceKm <= 300) ||
+        (q.mag >= 6.0 && q.distanceKm <= 800) ||
+        (q.mag >= 7.0) ||
+        q.tsunami ||
+        ['orange', 'red'].includes(q.alert);
+      if (!notable) continue;
+
+      let severity = 2;
+      if (q.mag >= 7 || q.tsunami || q.alert === 'red') severity = 4;
+      else if (q.mag >= 6 || q.alert === 'orange') severity = 3;
+
+      out.push(this.alert({
+        id: `quake:${q.id}`,
+        kind: 'quake',
+        severity,
+        title: q.tsunami
+          ? `Magnitude ${q.mag} earthquake — tsunami evaluation issued`
+          : `Magnitude ${q.mag} earthquake ${Math.round(q.distanceKm)} km away`,
+        detail: `${q.place}. Depth ${Math.round(q.depth)} km, ` +
+                `${Math.round(q.distanceKm)} km from ${place.name}, ${fmt.relative(q.time)}.`,
+        advice: q.tsunami
+          ? 'USGS has flagged this event for tsunami evaluation. If you are on the coast, move inland and to higher ground and follow MetMalaysia’s tsunami bulletins rather than waiting for visible signs.'
+          : severity >= 3
+            ? 'Expect aftershocks. Check for structural cracks before re-entering older buildings, and keep heavy objects off high shelves.'
+            : 'No action needed for most people at this distance. Listed for awareness.',
+        when: fmt.relative(q.time),
+        whenTs: q.time,
+        reading: `M${q.mag} · ${Math.round(q.distanceKm)} km · ${Math.round(q.depth)} km deep`,
+        link: q.url,
+        source: 'USGS Earthquake Hazards Program'
+      }));
+      if (out.length >= 4) break;
+    }
+    return out;
+  },
+
+  /** Seasonal context — always shown, lowest priority. */
+  fromMonsoon(place) {
+    const phase = monsoonPhase();
+    const affects = monsoonAffectsPlace(phase, place);
+    return [this.alert({
+      id: `monsoon:${phase.key}`,
+      kind: 'season',
+      severity: 1,
+      title: `${phase.name} (${phase.window})`,
+      detail: phase.summary + (affects
+        ? ` ${place.state} is among the areas this phase affects most.`
+        : ''),
+      advice: phase.risks.join(' · '),
+      when: 'This season',
+      whenTs: Date.now() + 9e12,   // sorts last within its severity
+      reading: phase.malay,
+      source: 'Malaysian monsoon calendar'
+    })];
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 27 · ALERTING
+ * ---------------------------------------------------------------------------
+ * Desktop notifications plus an audible alarm, both fired only for alerts at
+ * or above the severity the user chose, and only once per alert.
+ *
+ * An honest limit: a static site has no server, so it cannot send Web Push.
+ * Alerts therefore fire while a tab is open — which the service worker keeps
+ * cheap — and the Settings dialog says so rather than implying otherwise.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const Alerting = {
+  audio: null,
+
+  /** Permission must be requested from a user gesture, never on load. */
+  async requestPermission() {
+    if (!('Notification' in window)) {
+      toast('This browser does not support notifications.', 'warn');
+      return false;
+    }
+    if (Notification.permission === 'denied') {
+      toast('Notifications are blocked for this site. Re-enable them in your browser’s site settings.', 'warn', 7000);
+      return false;
+    }
+    const result = Notification.permission === 'granted'
+      ? 'granted'
+      : await Notification.requestPermission();
+    state.notifications = result === 'granted';
+    saveSettings();
+    if (state.notifications) toast('Hazard notifications are on.', 'success');
+    return state.notifications;
+  },
+
+  /**
+   * Two-tone alarm synthesised with WebAudio, so there is no audio file to
+   * download and it works offline. The context is created lazily because
+   * browsers refuse to start one before a user gesture.
+   */
+  sound(severity) {
+    if (!state.alertSound) return;
+    try {
+      this.audio = this.audio || new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = this.audio;
+      if (ctx.state === 'suspended') ctx.resume();
+
+      const beeps = severity >= 4 ? 4 : severity >= 3 ? 2 : 1;
+      for (let i = 0; i < beeps; i += 1) {
+        const t = ctx.currentTime + i * 0.42;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(severity >= 4 ? 880 : 660, t);
+        osc.frequency.setValueAtTime(severity >= 4 ? 660 : 520, t + 0.18);
+        // A short ramp instead of a hard stop avoids an audible click.
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.22, t + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.36);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.4);
+      }
+    } catch { /* audio is a nicety, never a failure */ }
+  },
+
+  /** Fire for anything new at or above the chosen severity. */
+  dispatch(alerts) {
+    if (!state.alertsEnabled) return;
+    const fresh = alerts.filter((a) =>
+      a.severity >= state.alertMinSeverity && !state.seenHazards.has(a.id));
+    if (!fresh.length) return;
+
+    for (const a of fresh) state.seenHazards.add(a.id);
+    const worst = fresh.reduce((m, a) => (a.severity > m.severity ? a : m), fresh[0]);
+
+    this.sound(worst.severity);
+    toast(`${SEVERITY_LABEL[worst.severity]}: ${worst.title}`,
+          worst.severity >= 3 ? 'error' : 'warn', 9000);
+
+    if (state.notifications && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        const n = new Notification(`${SEVERITY_LABEL[worst.severity]} · ${state.place?.name ?? 'CuacaMY'}`, {
+          body: `${worst.title}\n${worst.detail}`,
+          icon: './assets/icon-192.png',
+          badge: './assets/icon-192.png',
+          tag: worst.id,                    // replaces rather than stacks
+          requireInteraction: worst.severity >= 4
+        });
+        n.onclick = () => { window.focus(); setView('alerts'); n.close(); };
+      } catch (err) {
+        Telemetry.record('alert', { lvl: 'warn', msg: 'Notification failed: ' + err.message });
+      }
+    }
+
+    Telemetry.record('alert', {
+      lvl: worst.severity >= 3 ? 'error' : 'warn',
+      msg: `${fresh.length} new alert(s); worst: ${worst.title}`
+    });
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 28 · CLIMATE NORMALS
+ * ---------------------------------------------------------------------------
+ * "Is this month unusual?" is only answerable against a baseline. Rather than
+ * asserting an El Niño signal, this downloads the 1991-2020 daily reanalysis
+ * for the exact location, computes the thirty-year mean for each calendar
+ * month, and compares the current month against it. The anomaly is therefore
+ * measured, and the user can see the arithmetic.
+ *
+ * It is opt-in: thirty years of daily rows is a few hundred kilobytes, which
+ * should never be spent without the user asking. The result is cached in
+ * IndexedDB for a year.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const Climate = {
+  BASE_START: '1991-01-01',
+  BASE_END: '2020-12-31',
+
+  cacheKey: (lat, lon) => `climate:${round(lat, 1)}:${round(lon, 1)}`,
+
+  async load(place, { force = false } = {}) {
+    const key = this.cacheKey(place.lat, place.lon);
+    if (!force) {
+      try {
+        const hit = await IDB.get('kv', key);
+        if (hit && Date.now() - hit.at < 365 * 86400000) return hit.value;
+      } catch { /* fall through to the network */ }
+    }
+
+    const normals = await this.compute(place);
+    try { await IDB.put('kv', { key, value: normals, at: Date.now() }); } catch { /* not fatal */ }
+    return normals;
+  },
+
+  async compute(place) {
+    const started = performance.now();
+    const raw = await OpenMeteo.archive(place.lat, place.lon, this.BASE_START, this.BASE_END);
+    const times = raw.daily?.time || [];
+    const temps = raw.daily?.temperature_2m_mean || [];
+    const rain  = raw.daily?.precipitation_sum || [];
+
+    // Accumulate per calendar month, and per month-and-year so monthly rainfall
+    // totals can be averaged across the thirty years rather than summed.
+    const monthTemp = Array.from({ length: 12 }, () => []);
+    const monthYearRain = new Map();
+
+    for (let i = 0; i < times.length; i += 1) {
+      const m = Number(times[i].slice(5, 7)) - 1;
+      const y = times[i].slice(0, 4);
+      if (typeof temps[i] === 'number') monthTemp[m].push(temps[i]);
+      if (typeof rain[i] === 'number') {
+        const k = `${m}:${y}`;
+        monthYearRain.set(k, (monthYearRain.get(k) || 0) + rain[i]);
+      }
+    }
+
+    const avg = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+
+    const months = [];
+    for (let m = 0; m < 12; m += 1) {
+      const yearTotals = [...monthYearRain.entries()]
+        .filter(([k]) => Number(k.split(':')[0]) === m)
+        .map(([, v]) => v);
+      months.push({
+        month: m,
+        meanTempC: avg(monthTemp[m]),
+        meanRainMm: avg(yearTotals),
+        years: yearTotals.length
+      });
+    }
+
+    Telemetry.record('climate', {
+      lvl: 'perf',
+      msg: `Computed 1991-2020 normals from ${times.length} days in ${fmt.ms(performance.now() - started)}`
+    });
+
+    return {
+      place: { name: place.name, lat: place.lat, lon: place.lon },
+      baseline: '1991–2020',
+      days: times.length,
+      months,
+      computedAt: Date.now()
+    };
+  },
+
+  /** Compare the current month so far against the normal for that month. */
+  async anomaly(place) {
+    const normals = await this.load(place);
+    const now = new Date();
+    const m = now.getMonth();
+    const normal = normals.months[m];
+
+    // Month-to-date observations come from the same reanalysis, so the
+    // comparison is like for like rather than mixing model sources.
+    const start = `${now.getFullYear()}-${String(m + 1).padStart(2, '0')}-01`;
+    const end = new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10);
+    let observed = null;
+
+    if (end >= start) {
+      try {
+        const raw = await OpenMeteo.archive(place.lat, place.lon, start, end);
+        const t = (raw.daily?.temperature_2m_mean || []).filter((v) => typeof v === 'number');
+        const r = (raw.daily?.precipitation_sum || []).filter((v) => typeof v === 'number');
+        if (t.length) {
+          observed = {
+            meanTempC: t.reduce((a, b) => a + b, 0) / t.length,
+            rainMm: r.reduce((a, b) => a + b, 0),
+            days: t.length
+          };
+        }
+      } catch { /* the normal alone is still worth showing */ }
+    }
+
+    const monthName = ['January','February','March','April','May','June',
+                       'July','August','September','October','November','December'][m];
+
+    // Rainfall is scaled to the elapsed portion of the month, otherwise a
+    // comparison made on the 3rd would always look catastrophically dry.
+    const share = observed ? observed.days / new Date(now.getFullYear(), m + 1, 0).getDate() : 0;
+    const expectedRain = normal.meanRainMm !== null ? normal.meanRainMm * share : null;
+
+    return {
+      normals, normal, observed, monthName,
+      tempAnomaly: observed && normal.meanTempC !== null
+        ? observed.meanTempC - normal.meanTempC : null,
+      rainRatio: observed && expectedRain ? observed.rainMm / expectedRain : null,
+      expectedRain
+    };
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 29 · ANALYTICAL ASSISTANT
+ * ---------------------------------------------------------------------------
+ * A deliberate design choice: this reasons over the data already loaded rather
+ * than calling a language model.
+ *
+ * A static site cannot hide an API key, so shipping an LLM integration would
+ * mean either exposing a key to every visitor or asking each visitor to paste
+ * their own — a real security weakness in a project whose whole claim is that
+ * it has none. A deterministic engine instead is auditable, instant, free,
+ * works offline, and cannot hallucinate a rainfall figure.
+ *
+ * It matches intent from the question, computes an answer from state, and
+ * shows the readings it used so the reasoning can be checked.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const Assistant = {
+  history: [],
+
+  suggestions: [
+    'Will it rain today?',
+    'When is the best time to go out?',
+    'Is it safe outside right now?',
+    'What should I bring today?',
+    'How does this week look?',
+    'Why is it so humid?'
+  ],
+
+  /** Route a question to a handler. First match wins, so order matters. */
+  intents: [
+    { name: 'rain',     test: /\b(rain|hujan|wet|umbrella|payung|downpour|storm|ribut|thunder)\b/i },
+    { name: 'timing',   test: /\b(best time|when should|good time|go out|outdoor|jog|run|exercise|cycle|walk)\b/i },
+    { name: 'safety',   test: /\b(safe|safety|danger|risk|warning|alert|flood|banjir|earthquake|gempa|hazard)\b/i },
+    { name: 'bring',    test: /\b(bring|wear|pack|clothes|jacket|what should i)\b/i },
+    { name: 'week',     test: /\b(week|5.?day|five.?day|forecast|coming days|tomorrow|esok)\b/i },
+    { name: 'humidity', test: /\b(humid|humidity|sticky|lembap|muggy|dew)\b/i },
+    { name: 'air',      test: /\b(air|haze|jerebu|pollution|aqi|api|pm2|mask|breath)\b/i },
+    { name: 'compare',  test: /\b(compare|versus|vs\.?|cooler than|hotter than|better than)\b/i },
+    { name: 'season',   test: /\b(season|monsoon|monsun|el ni|la ni|enso|climate|normal|average)\b/i },
+    { name: 'sun',      test: /\b(sun|sunrise|sunset|uv|burn|matahari)\b/i },
+    { name: 'now',      test: /\b(now|current|right now|temperature|how hot|how cold|weather)\b/i }
+  ],
+
+  ask(question) {
+    const q = (question || '').trim();
+    if (!q) return null;
+
+    const intent = this.intents.find((i) => i.test.test(q))?.name || 'now';
+    const answer = this.answer(intent, q);
+    const entry = { q, intent, ...answer, at: Date.now() };
+    this.history.push(entry);
+    Telemetry.record('assistant', { lvl: 'info', msg: `"${q.slice(0, 48)}" -> ${intent}` });
+    return entry;
+  },
+
+  answer(intent, q) {
+    if (!state.current) {
+      return { text: 'I do not have any weather loaded yet. Search for a place, or use the locate button, and ask me again.', facts: [] };
+    }
+    const fn = this[`_${intent}`] || this._now;
+    try { return fn.call(this, q); }
+    catch (err) {
+      return { text: 'I could not work that one out from the data I have loaded.', facts: [`Error: ${err.message}`] };
+    }
+  },
+
+  /* ── Handlers. Each returns { text, facts[] }. ──────────────────────────── */
+
+  _now() {
+    const c = state.current;
+    const dewC = dewPointC(this.tempC(c.main.temp), c.main.humidity);
+    return {
+      text: `Right now in ${state.place.name} it is ${fmt.temp(c.main.temp, true)} with ${c.weather[0].description}, ` +
+            `feeling like ${fmt.temp(c.main.feels_like, true)}. Humidity is ${c.main.humidity}% and the wind is ${fmt.wind(c.wind?.speed)} from the ${fmt.bearing(c.wind?.deg).split(' ')[0]}. ` +
+            comfortLabel(dewC).toLowerCase().replace(/^./, (m) => m.toUpperCase()) + '.',
+      facts: [`Observed ${fmt.relative(c.dt * 1000)}`,
+              `Dew point ${fmt.temp(state.units === 'imperial' ? dewC * 9 / 5 + 32 : dewC)}`,
+              `Source: ${state.providerUsed === 'open-meteo' ? 'Open-Meteo' : 'OpenWeatherMap'}`]
+    };
+  },
+
+  _rain() {
+    const next12 = state.hourly.filter((h) => h.dt * 1000 < Date.now() + 12 * 3600 * 1000);
+    const wettest = next12.reduce((m, h) => (h.pop > (m?.pop ?? -1) ? h : m), null);
+    const today = state.daily[0];
+
+    if (!wettest) return { text: 'I do not have an hourly series loaded for this place.', facts: [] };
+
+    const chance = Math.round(wettest.pop);
+    const verdict = chance >= 70 ? 'Yes — rain is likely'
+                  : chance >= 40 ? 'Quite possibly'
+                  : chance >= 20 ? 'Probably not, but it is not out of the question'
+                  : 'Unlikely';
+
+    const dry = next12.filter((h) => h.pop < 25);
+    return {
+      text: `${verdict}. The wettest point in the next 12 hours is around ${fmt.clock(wettest.dt, wettest.tz)} ` +
+            `at a ${chance}% chance, and ${Math.round(today?.precipMm ?? 0)} mm is forecast across the whole day. ` +
+            (dry.length
+              ? `The driest stretch looks like ${fmt.clock(dry[0].dt, dry[0].tz)}.`
+              : 'There is no clearly dry window in that period.'),
+      facts: [`Peak probability ${chance}% at ${fmt.clock(wettest.dt, wettest.tz)}`,
+              `Daily total ${Math.round(today?.precipMm ?? 0)} mm`,
+              today?.precipMm >= 60 ? 'Above MetMalaysia’s 60 mm alert threshold' : 'Below MetMalaysia’s 60 mm alert threshold']
+    };
+  },
+
+  _timing() {
+    const next = state.hourly.filter((h) => h.dt * 1000 > Date.now() - 3600000).slice(0, 8);
+    if (!next.length) return { text: 'I need an hourly forecast to answer that.', facts: [] };
+
+    // Lower is better: rain, heat and UV all penalised.
+    const scored = next.map((h) => {
+      const tC = this.tempC(h.temp);
+      const heat = Math.max(0, tC - 30) * 3;
+      const cold = Math.max(0, 20 - tC) * 2;
+      return { h, score: h.pop * 1.4 + heat + cold + Math.max(0, (h.uvi ?? 0) - 7) * 4 };
+    }).sort((a, b) => a.score - b.score);
+
+    const best = scored[0].h;
+    const worst = scored[scored.length - 1].h;
+    return {
+      text: `The best window in the next 24 hours looks like ${fmt.clock(best.dt, best.tz)} — ` +
+            `${fmt.temp(best.temp, true)}, ${Math.round(best.pop)}% chance of rain. ` +
+            `Avoid around ${fmt.clock(worst.dt, worst.tz)}, which is the least comfortable slot ` +
+            `at ${fmt.temp(worst.temp, true)} and ${Math.round(worst.pop)}% rain.`,
+      facts: ['Scored on rain probability, heat, cold and UV',
+              `Best ${fmt.clock(best.dt, best.tz)} · worst ${fmt.clock(worst.dt, worst.tz)}`]
+    };
+  },
+
+  _safety() {
+    const list = state.hazards.filter((a) => a.severity >= 2);
+    if (!list.length) {
+      return {
+        text: `Nothing is flagged for ${state.place.name} right now. No rainfall, wind, heat, air-quality or seismic threshold is currently exceeded.`,
+        facts: [`${state.hazards.length} item(s) checked`, 'Rain, storms, wind, heat, UV, air quality, river discharge, earthquakes']
+      };
+    }
+    const worst = list[0];
+    return {
+      text: `${list.length} thing${list.length === 1 ? '' : 's'} worth knowing. The most serious is a ` +
+            `${SEVERITY_LABEL[worst.severity].toLowerCase()}: ${worst.title}. ${worst.detail} ${worst.advice}`,
+      facts: list.slice(0, 4).map((a) => `${SEVERITY_LABEL[a.severity]}: ${a.title} (${a.reading})`)
+    };
+  },
+
+  _bring() {
+    const c = state.current;
+    const today = state.daily[0];
+    const items = [];
+    if ((today?.pop ?? 0) > 0.3 || (today?.precipMm ?? 0) > 5) items.push('an umbrella or a light rain jacket');
+    if ((today?.uvMax ?? 0) >= 8) items.push('sunscreen and a hat');
+    if (this.tempC(c.main.temp) >= 31) items.push('more water than you think you need');
+    if (state.airIndex && state.airIndex.value > 100) items.push('an N95 mask for the haze');
+    if (this.tempC(today?.min ?? 25) <= 20) items.push('a layer for the evening');
+    if (!items.length) items.push('nothing special — it is a straightforward day');
+
+    return {
+      text: `For ${state.place.name} today: ${items.join(', ')}. ` +
+            `Expect a high of ${fmt.temp(today?.max, true)} and a low of ${fmt.temp(today?.min, true)}.`,
+      facts: [`Rain chance ${Math.round((today?.pop ?? 0) * 100)}%`,
+              `UV peak ${Math.round(today?.uvMax ?? 0)}`,
+              state.airIndex ? `Air Pollutant Index ${state.airIndex.value}` : 'Air quality unavailable']
+    };
+  },
+
+  _week() {
+    if (!state.daily.length) return { text: 'No forecast is loaded yet.', facts: [] };
+    const wettest = state.daily.reduce((m, d) => ((d.precipMm ?? 0) > (m.precipMm ?? 0) ? d : m));
+    const hottest = state.daily.reduce((m, d) => (d.max > m.max ? d : m));
+    const totalRain = state.daily.reduce((a, d) => a + (d.precipMm ?? 0), 0);
+
+    return {
+      text: `Over the next ${state.daily.length} days in ${state.place.name}, expect around ${Math.round(totalRain)} mm of rain in total. ` +
+            `${fmt.dayName(wettest.dt, wettest.tz, true)} looks wettest at ${Math.round(wettest.precipMm ?? 0)} mm, and ` +
+            `${fmt.dayName(hottest.dt, hottest.tz, true)} the hottest at ${fmt.temp(hottest.max, true)}.`,
+      facts: state.daily.map((d) =>
+        `${fmt.dayName(d.dt, d.tz)} ${fmt.temp(d.max)}/${fmt.temp(d.min)} · ${Math.round(d.precipMm ?? 0)} mm · ${Math.round(d.pop * 100)}% rain`)
+    };
+  },
+
+  _humidity() {
+    const c = state.current;
+    const dewC = dewPointC(this.tempC(c.main.temp), c.main.humidity);
+    return {
+      text: `Humidity is ${c.main.humidity}%, and the dew point — the number that actually governs how sticky air feels — ` +
+            `is ${fmt.temp(state.units === 'imperial' ? dewC * 9 / 5 + 32 : dewC, true)}. ${comfortLabel(dewC)}. ` +
+            'Above about 24 °C dew point, sweat stops evaporating efficiently, which is why ' +
+            `${fmt.temp(c.main.temp)} in Malaysia is harder work than the same reading in a dry climate.`,
+      facts: [`Relative humidity ${c.main.humidity}%`,
+              `Dew point ${fmt.temp(state.units === 'imperial' ? dewC * 9 / 5 + 32 : dewC, true)}`,
+              `Feels like ${fmt.temp(c.main.feels_like, true)} vs actual ${fmt.temp(c.main.temp, true)}`]
+    };
+  },
+
+  _air() {
+    const idx = state.airIndex;
+    if (!idx) return { text: 'Air quality data has not loaded for this place.', facts: [] };
+    return {
+      text: `The Air Pollutant Index here is about ${idx.value} — ${idx.label.toLowerCase()}, driven by ${idx.driver}. ${idx.note}`,
+      facts: [`API ${idx.value} (${idx.label})`,
+              `Driven by ${idx.driver}`,
+              'Modelled estimate, not a DOE station reading']
+    };
+  },
+
+  _compare() {
+    if (!state.favourites.length) {
+      return {
+        text: 'Save a couple of places first and I can compare them. There is also a live comparison of all 16 state capitals under Explore Malaysia.',
+        facts: []
+      };
+    }
+    return {
+      text: `You have ${state.favourites.length} saved place${state.favourites.length === 1 ? '' : 's'}: ` +
+            `${state.favourites.map((f) => f.name).join(', ')}. Their current temperatures are on the dashboard, ` +
+            'and Explore Malaysia compares every state capital side by side.',
+      facts: state.favourites.map((f) => `${f.name}${f.state ? ', ' + f.state : ''}`)
+    };
+  },
+
+  _season() {
+    const phase = monsoonPhase();
+    const affects = monsoonAffectsPlace(phase, state.place);
+    return {
+      text: `Malaysia is in the ${phase.name.toLowerCase()} (${phase.window}). ${phase.summary} ` +
+            (affects ? `${state.place.state} is one of the areas this phase affects most.`
+                     : `${state.place.state || state.place.name} is not among the areas it hits hardest.`),
+      facts: phase.risks
+    };
+  },
+
+  _sun() {
+    const c = state.current;
+    const tz = c.timezone ?? 0;
+    const uv = state.daily[0]?.uvMax;
+    return {
+      text: `Sunrise is at ${fmt.clock(c.sys.sunrise, tz)} and sunset at ${fmt.clock(c.sys.sunset, tz)}, ` +
+            `giving about ${round((c.sys.sunset - c.sys.sunrise) / 3600, 1)} hours of daylight. ` +
+            (uv ? `UV peaks near ${Math.round(uv)} today${uv >= 8 ? ', which is high enough to burn unprotected skin quickly' : ''}.` : ''),
+      facts: [`Sunrise ${fmt.clock(c.sys.sunrise, tz)}`, `Sunset ${fmt.clock(c.sys.sunset, tz)}`,
+              uv ? `Peak UV ${Math.round(uv)}` : 'UV unavailable']
+    };
+  },
+
+  tempC(v) { return state.units === 'imperial' ? (v - 32) * 5 / 9 : v; },
+
+  /** A short standing summary, shown before anything is asked. */
+  briefing() {
+    if (!state.current || !state.daily.length) return null;
+    const c = state.current;
+    const today = state.daily[0];
+    const worst = state.hazards.find((a) => a.severity >= 2);
+    const phase = monsoonPhase();
+
+    return `${state.place.name} is ${fmt.temp(c.main.temp, true)} with ${c.weather[0].description}. ` +
+           `Today runs ${fmt.temp(today.min)} to ${fmt.temp(today.max)} with ${Math.round(today.pop * 100)}% rain chance ` +
+           `and about ${Math.round(today.precipMm ?? 0)} mm expected. ` +
+           (worst ? `${SEVERITY_LABEL[worst.severity]}: ${worst.title}. ` : 'Nothing is currently flagged. ') +
+           `We are in the ${phase.name.toLowerCase()}.`;
+  }
+};
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 30 · RENDERING — ALERTS, CLIMATE, ASSISTANT
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/** Malaysian Air Pollutant Index from whichever pollutant data we have. */
+function computeAirIndex() {
+  const air = state.air;
+  if (!air) return null;
+  // 24-hour means are what the index is defined on; the current reading is
+  // used only when the provider gives no hourly history.
+  const pm25 = air.pm25_24h ?? air.list?.[0]?.components?.pm2_5 ?? null;
+  const pm10 = air.pm10_24h ?? air.list?.[0]?.components?.pm10 ?? null;
+  return malaysianAPI(pm25, pm10);
+}
+
+/** Run the hazard sweep and repaint everything that depends on it. */
+async function runHazards() {
+  if (!state.place) return;
+  const strip = $('#hazard-strip');
+  strip.dataset.state = 'loading';
+  strip.dataset.tone = 'info';
+  strip.replaceChildren(
+    icon('i-shield', 'hazard-strip__icon'),
+    el('div', {}, [
+      el('strong', { textContent: 'Checking for hazards…' }),
+      el('span', { textContent: 'Rainfall, storms, wind, heat, UV, air quality, river levels and earthquakes.' })
+    ])
+  );
+
+  try {
+    state.hazards = await Hazards.assess(state.place);
+  } catch (err) {
+    state.hazards = [];
+    Telemetry.record('hazard', { lvl: 'error', msg: 'Hazard sweep failed: ' + err.message });
+  }
+
+  strip.dataset.state = 'ready';
+  renderHazardStrip();
+  renderAlertsView();
+  renderAssistant();
+  Alerting.dispatch(state.hazards);
+}
+
+/** The compact banner on the dashboard: worst alert, or an all-clear. */
+function renderHazardStrip() {
+  const strip = $('#hazard-strip');
+  strip.replaceChildren();
+
+  const actionable = state.hazards.filter((a) => a.severity >= 2);
+  const count = $('#tab-alerts-count');
+
+  if (count) {
+    count.textContent = actionable.length ? String(actionable.length) : '';
+    count.hidden = actionable.length === 0;
+    count.dataset.tone = actionable.some((a) => a.severity >= 4) ? 'severe'
+                       : actionable.some((a) => a.severity >= 3) ? 'warn' : 'ok';
+  }
+
+  if (!actionable.length) {
+    strip.dataset.tone = 'clear';
+    strip.appendChild(icon('i-shield', 'hazard-strip__icon'));
+    strip.appendChild(el('div', {}, [
+      el('strong', { textContent: 'No active alerts' }),
+      el('span', { textContent: `Rain, storms, wind, heat, UV, air quality, river levels and earthquakes all checked for ${state.place.name}.` })
+    ]));
+    return;
+  }
+
+  const worst = actionable[0];
+  strip.dataset.tone = SEVERITY_TONE[worst.severity];
+  strip.appendChild(icon(hazardIcon(worst.kind), 'hazard-strip__icon'));
+  strip.appendChild(el('div', {}, [
+    el('strong', { textContent: `${SEVERITY_LABEL[worst.severity]} · ${worst.title}` }),
+    el('span', { textContent: worst.detail })
+  ]));
+
+  const more = el('button', { className: 'hazard-strip__cta', type: 'button' },
+    [actionable.length > 1 ? `See all ${actionable.length}` : 'Details']);
+  more.addEventListener('click', () => setView('alerts'));
+  strip.appendChild(more);
+}
+
+const HAZARD_ICONS = {
+  rain: 'wx-rain', storm: 'wx-thunder', wind: 'i-wind', heat: 'i-sun-ui',
+  uv: 'i-sun-ui', haze: 'i-leaf', flood: 'i-drop', quake: 'i-quake', season: 'i-calendar'
+};
+const hazardIcon = (kind) => HAZARD_ICONS[kind] || 'i-shield';
+
+function renderAlertsView() {
+  const host = $('#alerts-list');
+  host.replaceChildren();
+
+  const summary = $('#alerts-summary');
+  const actionable = state.hazards.filter((a) => a.severity >= 2);
+  summary.textContent = state.hazards.length
+    ? (actionable.length
+        ? `${actionable.length} active alert${actionable.length === 1 ? '' : 's'} for ${state.place.name}. Checked: rainfall, storms, wind, heat, UV, air quality, river discharge and seismic activity.`
+        : `Nothing active for ${state.place.name}. Rainfall, storms, wind, heat, UV, air quality, river discharge and seismic activity were all checked and none crossed a warning threshold.`)
+    : 'Running checks…';
+
+  if (!state.hazards.length) {
+    host.appendChild(el('p', { className: 'empty', textContent: 'No hazard data yet.' }));
+  }
+
+  for (const a of state.hazards) {
+    const card = el('article', { className: 'alert', dataset: { tone: SEVERITY_TONE[a.severity] } });
+
+    const head = el('div', { className: 'alert__head' });
+    head.appendChild(icon(hazardIcon(a.kind), 'alert__icon'));
+    head.appendChild(el('div', { className: 'alert__titles' }, [
+      el('span', { className: 'alert__sev', textContent: SEVERITY_LABEL[a.severity] }),
+      el('h3', { className: 'alert__title', textContent: a.title })
+    ]));
+    head.appendChild(el('span', { className: 'alert__when', textContent: a.when }));
+    card.appendChild(head);
+
+    card.appendChild(el('p', { className: 'alert__detail', textContent: a.detail }));
+    card.appendChild(el('p', { className: 'alert__advice' }, [
+      el('strong', { textContent: 'What to do: ' }),
+      document.createTextNode(a.advice)
+    ]));
+
+    const foot = el('div', { className: 'alert__foot' });
+    if (a.reading) foot.appendChild(el('code', { textContent: a.reading }));
+    foot.appendChild(el('span', { className: 'alert__source', textContent: a.source }));
+    if (a.link) {
+      foot.appendChild(el('a', {
+        href: a.link, target: '_blank', rel: 'noopener noreferrer',
+        className: 'alert__link', textContent: 'Official source ↗'
+      }));
+    }
+    card.appendChild(foot);
+    host.appendChild(card);
+  }
+
+  renderQuakeList();
+  renderFloodPanel();
+  renderMonsoonPanel();
+}
+
+function renderQuakeList() {
+  const host = $('#quake-list');
+  const empty = $('#quake-empty');
+  host.replaceChildren();
+
+  if (!state.quakes.length) { empty.hidden = false; return; }
+  empty.hidden = true;
+
+  for (const q of state.quakes.slice(0, 8)) {
+    const row = el('a', {
+      className: 'quake', href: q.url, target: '_blank', rel: 'noopener noreferrer'
+    });
+    const magTone = q.mag >= 7 ? 'severe' : q.mag >= 6 ? 'warn' : q.mag >= 5 ? 'ok' : 'info';
+    row.appendChild(el('span', { className: 'quake__mag', dataset: { tone: magTone },
+                                 textContent: q.mag?.toFixed(1) ?? '—' }));
+    row.appendChild(el('div', {}, [
+      el('div', { className: 'quake__place', textContent: q.place || 'Unknown location' }),
+      el('div', { className: 'quake__meta',
+                  textContent: `${Math.round(q.distanceKm)} km away · ${Math.round(q.depth)} km deep · ${fmt.relative(q.time)}` })
+    ]));
+    if (q.tsunami) row.appendChild(el('span', { className: 'quake__flag', textContent: 'Tsunami' }));
+    host.appendChild(row);
+  }
+}
+
+function renderFloodPanel() {
+  const wrap = $('#flood-panel');
+  const f = state.flood;
+  if (!f) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+
+  $('#flood-now').textContent = `${round(f.today, 2)} m³/s`;
+  $('#flood-median').textContent = `${round(f.median, 2)} m³/s`;
+  $('#flood-peak').textContent = `${round(f.peak, 2)} m³/s`;
+
+  const ratio = f.median ? f.peak / f.median : 0;
+  const label = ratio >= 4 ? 'Well above normal' : ratio >= 2.5 ? 'Above normal'
+              : ratio >= 1.5 ? 'Slightly elevated' : 'Within normal range';
+  $('#flood-verdict').textContent = label;
+  $('#flood-verdict').dataset.tone = ratio >= 4 ? 'warn' : ratio >= 2.5 ? 'ok' : 'info';
+
+  renderFloodChart();
+}
+
+function renderFloodChart() {
+  const canvas = $('#flood-chart');
+  if (!canvas || !state.flood || canvas.offsetParent === null) return;
+  const { ctx, w, h } = setupCanvas(canvas);
+  const series = state.flood.series.slice(0, 30);
+  if (!series.length) return;
+
+  const max = Math.max(...series) * 1.15 || 1;
+  const barW = (w - 8) / series.length;
+  const median = state.flood.median;
+
+  series.forEach((v, i) => {
+    const bh = Math.max(2, (v / max) * (h - 26));
+    const x = 4 + i * barW;
+    ctx.fillStyle = v > median * 2.5 ? themeColor('--c-bad', '#f87171')
+                  : v > median * 1.5 ? themeColor('--c-warn', '#fbbf24')
+                  : themeColor('--c-brand-400', '#47a8ff');
+    roundRect(ctx, x, h - 20 - bh, Math.max(2, barW - 2), bh, 2);
+    ctx.fill();
+  });
+
+  // Median reference line, so "above normal" is visible rather than asserted.
+  const my = h - 20 - (median / max) * (h - 26);
+  ctx.strokeStyle = themeColor('--text-dim', '#6b7899');
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(4, my); ctx.lineTo(w - 4, my); ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = themeColor('--text-dim', '#6b7899');
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('90-day median', 6, my - 4);
+  ctx.fillText('next 30 days →', 6, h - 5);
+}
+
+function renderMonsoonPanel() {
+  const phase = monsoonPhase();
+  const affects = monsoonAffectsPlace(phase, state.place);
+
+  $('#monsoon-name').textContent = phase.name;
+  $('#monsoon-malay').textContent = phase.malay;
+  $('#monsoon-window').textContent = phase.window;
+  $('#monsoon-summary').textContent = phase.summary;
+
+  const badge = $('#monsoon-affects');
+  badge.hidden = !affects;
+  if (affects) badge.textContent = `${state.place.state} is in the main impact zone`;
+
+  const risks = $('#monsoon-risks');
+  risks.replaceChildren();
+  for (const r of phase.risks) risks.appendChild(el('li', { textContent: r }));
+
+  const bar = $('#monsoon-bar');
+  bar.replaceChildren();
+  const order = [
+    { key: 'northeast', label: 'NE monsoon', months: 'Nov–Mar' },
+    { key: 'interNorth', label: 'Inter-monsoon', months: 'Apr–May' },
+    { key: 'southwest', label: 'SW monsoon', months: 'Jun–Sep' },
+    { key: 'interSouth', label: 'Inter-monsoon', months: 'Oct' }
+  ];
+  for (const seg of order) {
+    bar.appendChild(el('div', {
+      className: 'monsoon-seg' + (seg.key === phase.key ? ' is-active' : '')
+    }, [
+      el('strong', { textContent: seg.label }),
+      el('span', { textContent: seg.months })
+    ]));
+  }
+}
+
+/* ── Climate ──────────────────────────────────────────────────────────────── */
+
+async function renderClimate({ force = false } = {}) {
+  const status = $('#climate-status');
+  const body = $('#climate-body');
+  if (!state.place) return;
+
+  status.textContent = 'Downloading 30 years of daily reanalysis for this exact location…';
+  status.hidden = false;
+  $('#btn-climate').disabled = true;
+
+  try {
+    const a = await Climate.anomaly(state.place, { force });
+    state.climate = a;
+    status.hidden = true;
+    body.hidden = false;
+
+    $('#climate-place').textContent = `${state.place.name} · baseline ${a.normals.baseline} (${a.normals.days.toLocaleString()} days)`;
+    $('#climate-month').textContent = a.monthName;
+    $('#climate-normal-temp').textContent = a.normal.meanTempC !== null ? `${round(a.normal.meanTempC, 1)} °C` : '—';
+    $('#climate-normal-rain').textContent = a.normal.meanRainMm !== null ? `${Math.round(a.normal.meanRainMm)} mm` : '—';
+
+    if (a.observed) {
+      $('#climate-actual-temp').textContent = `${round(a.observed.meanTempC, 1)} °C`;
+      $('#climate-actual-rain').textContent = `${Math.round(a.observed.rainMm)} mm`;
+
+      const t = a.tempAnomaly;
+      const tNode = $('#climate-temp-anom');
+      tNode.textContent = t === null ? '—'
+        : `${t >= 0 ? '+' : ''}${round(t, 1)} °C vs normal`;
+      tNode.dataset.tone = t === null ? 'info' : t > 1 ? 'warn' : t < -1 ? 'ok' : 'info';
+
+      const r = a.rainRatio;
+      const rNode = $('#climate-rain-anom');
+      rNode.textContent = r === null ? '—'
+        : r >= 1.3 ? `${Math.round((r - 1) * 100)}% wetter than normal so far`
+        : r <= 0.7 ? `${Math.round((1 - r) * 100)}% drier than normal so far`
+        : 'Close to normal so far';
+      rNode.dataset.tone = r === null ? 'info' : (r >= 1.5 || r <= 0.5) ? 'warn' : 'info';
+
+      $('#climate-note').textContent =
+        `Month-to-date covers ${a.observed.days} day${a.observed.days === 1 ? '' : 's'}, so rainfall is compared against ` +
+        `the same fraction of the monthly normal (${Math.round(a.expectedRain)} mm expected by now). ` +
+        'A warm, dry anomaly in Malaysia is the local fingerprint of El Niño; a cool, wet one, of La Niña. ' +
+        'This is measured from reanalysis for your coordinates, not read from an ENSO bulletin.';
+    } else {
+      $('#climate-note').textContent = 'The current month has no finalised reanalysis days yet — check back in a few days.';
+    }
+
+    renderClimateChart(a.normals);
+  } catch (err) {
+    status.textContent = `Could not compute the climate normal: ${err.message}`;
+    Telemetry.record('climate', { lvl: 'error', msg: err.message });
+  } finally {
+    $('#btn-climate').disabled = false;
+  }
+}
+
+function renderClimateChart(normals) {
+  const canvas = $('#climate-chart');
+  if (!canvas || canvas.offsetParent === null) return;
+  const { ctx, w, h } = setupCanvas(canvas);
+
+  const rain = normals.months.map((m) => m.meanRainMm ?? 0);
+  const temp = normals.months.map((m) => m.meanTempC ?? 0);
+  const maxRain = Math.max(...rain) * 1.2 || 1;
+  const minT = Math.min(...temp) - 1, maxT = Math.max(...temp) + 1;
+
+  const padB = 26, padT = 14;
+  const plotH = h - padB - padT;
+  const barW = (w - 8) / 12;
+  const labels = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+  const nowMonth = new Date().getMonth();
+
+  rain.forEach((v, i) => {
+    const bh = (v / maxRain) * plotH;
+    const x = 4 + i * barW;
+    ctx.fillStyle = i === nowMonth
+      ? themeColor('--c-brand-400', '#47a8ff')
+      : hexToRgba(themeColor('--c-brand-500', '#1e86f0'), 0.35);
+    roundRect(ctx, x + 2, padT + plotH - bh, barW - 6, bh, 3);
+    ctx.fill();
+  });
+
+  ctx.beginPath();
+  temp.forEach((v, i) => {
+    const x = 4 + i * barW + barW / 2;
+    const y = padT + plotH - ((v - minT) / (maxT - minT)) * plotH;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = themeColor('--c-accent-500', '#ff9f1c');
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  ctx.fillStyle = themeColor('--text-dim', '#6b7899');
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  labels.forEach((l, i) => ctx.fillText(l, 4 + i * barW + barW / 2, h - 9));
+  ctx.textAlign = 'left';
+  ctx.fillText(`bars: mean monthly rain (peak ${Math.round(Math.max(...rain))} mm) · line: mean temperature`, 6, 11);
+}
+
+/* ── Assistant ────────────────────────────────────────────────────────────── */
+
+function renderAssistant() {
+  const brief = Assistant.briefing();
+  const node = $('#assistant-briefing');
+  if (node) node.textContent = brief || 'Load a location to get a briefing.';
+
+  const chips = $('#assistant-chips');
+  if (chips && !chips.childElementCount) {
+    for (const q of Assistant.suggestions) {
+      const chip = el('button', { className: 'ask-chip', type: 'button', textContent: q });
+      chip.addEventListener('click', () => { $('#assistant-input').value = q; askAssistant(); });
+      chips.appendChild(chip);
+    }
+  }
+}
+
+function askAssistant() {
+  const input = $('#assistant-input');
+  const q = input.value.trim();
+  if (!q) return;
+
+  const entry = Assistant.ask(q);
+  if (!entry) return;
+
+  const log = $('#assistant-log');
+  log.appendChild(el('div', { className: 'ask ask--q' }, [
+    el('span', { className: 'ask__who', textContent: 'You' }),
+    el('p', { textContent: entry.q })
+  ]));
+
+  const answer = el('div', { className: 'ask ask--a' });
+  answer.appendChild(el('span', { className: 'ask__who', textContent: 'CuacaMY' }));
+  answer.appendChild(el('p', { textContent: entry.text }));
+  if (entry.facts?.length) {
+    const facts = el('ul', { className: 'ask__facts' });
+    for (const f of entry.facts) facts.appendChild(el('li', { textContent: f }));
+    answer.appendChild(facts);
+  }
+  log.appendChild(answer);
+
+  input.value = '';
+  log.scrollTop = log.scrollHeight;
+  $('#assistant-empty').hidden = true;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * 19 · VIEWS
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-const VIEWS = ['dashboard', 'explore', 'analytics'];
+const VIEWS = ['dashboard', 'alerts', 'climate', 'explore', 'analytics'];
 
 function setView(name) {
   if (!VIEWS.includes(name)) name = 'dashboard';
@@ -2606,6 +4511,11 @@ function setView(name) {
   }
   if (name === 'analytics') renderAnalytics();
   if (name === 'dashboard') renderHourly();
+  if (name === 'alerts') { renderAlertsView(); renderFloodChart(); }
+  if (name === 'climate') {
+    renderMonsoonPanel();
+    if (state.climate) renderClimateChart(state.climate.normals);
+  }
 
   if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
   Telemetry.record('nav', { lvl: 'info', msg: 'Opened ' + name });
@@ -2741,12 +4651,17 @@ function openSettings() {
   $('#set-home').value = state.home;
   $('#set-analytics').checked = state.analytics !== false;
   $('#set-motion').checked = Boolean(state.reduceMotion);
+  $('#set-provider').value = state.provider;
+  $('#set-alerts').checked = state.alertsEnabled !== false;
+  $('#set-alert-sound').checked = state.alertSound !== false;
+  $('#set-severity').value = String(state.alertMinSeverity);
   $('#settings-dialog').showModal();
 }
 
 async function saveSettingsFromDialog() {
   const key = $('#set-apikey').value.trim();
   const hadKey = hasKey();
+  const providerChanged = state.provider !== $('#set-provider').value;
 
   if (key) safeLocal.set(LS.apiKey, key); else safeLocal.del(LS.apiKey);
 
@@ -2754,6 +4669,10 @@ async function saveSettingsFromDialog() {
   state.home = $('#set-home').value;
   state.analytics = $('#set-analytics').checked;
   state.reduceMotion = $('#set-motion').checked;
+  state.provider = $('#set-provider').value;
+  state.alertsEnabled = $('#set-alerts').checked;
+  state.alertSound = $('#set-alert-sound').checked;
+  state.alertMinSeverity = Number($('#set-severity').value);
   Telemetry.enabled = state.analytics;
 
   saveSettings();
@@ -2762,8 +4681,8 @@ async function saveSettingsFromDialog() {
   $('#settings-dialog').close();
   toast('Settings saved.', 'success');
 
-  if (key && !hadKey) {
-    CachePolicy.clear();          // demo payloads must not linger once a key exists
+  if ((key && !hadKey) || providerChanged) {
+    CachePolicy.clear();   // responses from the previous provider must not linger
     $('#banner-setup').hidden = true;
   }
   if (state.place) await loadPlace(state.place);
@@ -2837,6 +4756,8 @@ function wireEvents() {
     // Charts bake theme colours into pixels, so they must be repainted.
     renderHourly();
     if (activeView === 'analytics') renderAnalytics();
+    if (activeView === 'alerts') renderFloodChart();
+    if (activeView === 'climate' && state.climate) renderClimateChart(state.climate.normals);
   });
 
   $('#btn-account').addEventListener('click', () => {
@@ -2891,6 +4812,22 @@ function wireEvents() {
 
   $('#btn-compare').addEventListener('click', renderCapitalComparison);
   $('#compare-close').addEventListener('click', () => { $('#compare-card').hidden = true; });
+
+  /* ── Alerts, climate and the assistant ──────────────────────────────── */
+  $('#btn-notify').addEventListener('click', async () => {
+    const granted = await Alerting.requestPermission();
+    $('#btn-notify').textContent = granted ? 'Notifications on' : 'Enable notifications';
+    $('#btn-notify').disabled = granted;
+  });
+
+  $('#btn-test-alarm').addEventListener('click', () => {
+    Alerting.sound(3);
+    toast('That is the alarm you will hear for a warning.', 'info');
+  });
+
+  $('#btn-climate').addEventListener('click', () => renderClimate());
+
+  $('#assistant-form').addEventListener('submit', (e) => { e.preventDefault(); askAssistant(); });
 
   /* ── Analytics ──────────────────────────────────────────────────────── */
   $('#btn-export').addEventListener('click', () => {
@@ -2948,6 +4885,15 @@ function wireEvents() {
 
   /* ── Settings ───────────────────────────────────────────────────────── */
   $('#banner-setup-cta').addEventListener('click', openSettings);
+
+  $('#banner-geo-yes').addEventListener('click', async () => {
+    $('#banner-geo').hidden = true;
+    await detectLocation();
+  });
+  $('#banner-geo-no').addEventListener('click', () => {
+    $('#banner-geo').hidden = true;
+    safeLocal.set('cuacamy.geo.dismissed', '1');
+  });
   $('#btn-save-settings').addEventListener('click', saveSettingsFromDialog);
   $('#btn-reset').addEventListener('click', resetEverything);
 
@@ -2974,6 +4920,8 @@ function wireEvents() {
   window.addEventListener('resize', rafThrottle(() => {
     renderHourly();
     if (activeView === 'analytics') { renderLatencyChart(); renderCacheDonut(); }
+    if (activeView === 'alerts') renderFloodChart();
+    if (activeView === 'climate' && state.climate) renderClimateChart(state.climate.normals);
   }));
 
   /* ── Keep relative timestamps honest without a full re-render ───────── */
@@ -3020,17 +4968,40 @@ function registerServiceWorker() {
 /** Which place should the dashboard open on? */
 async function resolveStartPlace() {
   if (state.home === 'geo') {
+    // Only auto-locate when permission is already granted. Firing the
+    // permission prompt on page load, before the visitor knows what the site
+    // is, gets denied — and a denial is sticky. Otherwise a dismissable
+    // prompt appears once the dashboard is on screen.
+    let canAsk = false;
     try {
-      const pos = await getPosition({ timeout: 6000 });
-      const place = await Api.reverse(pos.coords.latitude, pos.coords.longitude);
-      return { ...place, lat: pos.coords.latitude, lon: pos.coords.longitude };
-    } catch { /* fall through to the saved place */ }
+      const status = await navigator.permissions?.query({ name: 'geolocation' });
+      canAsk = status?.state === 'granted';
+      if (status?.state === 'prompt') showLocationInvite();
+    } catch {
+      canAsk = false;
+      showLocationInvite();
+    }
+
+    if (canAsk) {
+      try {
+        const pos = await getPosition({ timeout: 8000 });
+        const place = await Api.reverse(pos.coords.latitude, pos.coords.longitude);
+        return { ...place, lat: pos.coords.latitude, lon: pos.coords.longitude };
+      } catch { /* fall through to the saved place */ }
+    }
   }
   if (state.home === 'kl') return { ...CONFIG.defaultCity };
 
   const last = safeLocal.json(LS.lastPlace, null);
   if (last && Number.isFinite(last.lat) && Number.isFinite(last.lon)) return last;
   return { ...CONFIG.defaultCity };
+}
+
+/** A dismissable invitation, shown instead of an unprompted permission dialog. */
+function showLocationInvite() {
+  if (safeLocal.get('cuacamy.geo.dismissed') === '1') return;
+  const banner = $('#banner-geo');
+  if (banner) banner.hidden = false;
 }
 
 async function boot() {
@@ -3055,8 +5026,14 @@ async function boot() {
 
   $('#foot-version').textContent = 'v' + VERSION;
   $('#banner-offline').hidden = navigator.onLine;
-  $('#banner-setup').hidden = hasKey();
+  $('#banner-setup').hidden = true;
   setAuthMode('signin');
+
+  if ('Notification' in window && Notification.permission === 'granted') {
+    state.notifications = true;
+    const btn = $('#btn-notify');
+    if (btn) { btn.textContent = 'Notifications on'; btn.disabled = true; }
+  }
 
   await Auth.init();
   renderAuthUI();

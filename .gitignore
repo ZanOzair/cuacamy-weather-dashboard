@@ -15,3 +15,7 @@ node_modules/
 dist/
 .cache/
 *.log
+
+# Created by the CI end-to-end job; the app itself has no dependencies
+package.json
+package-lock.json

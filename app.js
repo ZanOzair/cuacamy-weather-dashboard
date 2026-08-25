@@ -31,7 +31,7 @@
  * 01 · CONFIGURATION & CONSTANTS
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
 /**
  * Runtime configuration, resolved in priority order:

@@ -61,6 +61,10 @@ to a deterministic synthetic model rather than showing an empty shell, and label
 
 ### More screens
 
+| Hazard alerts | Season &amp; climate |
+|---|---|
+| <img src="docs/screenshot-alerts.png" alt="Hazard alerts view listing graded alerts with their readings and sources, plus recent earthquakes"> | <img src="docs/screenshot-climate.png" alt="Season and climate view showing the current monsoon phase and the four-phase calendar"> |
+
 | Explore Malaysia | Performance analytics |
 |---|---|
 | <img src="docs/screenshot-explore.png" alt="Explore Malaysia view with state filters and a live comparison of all 16 state capitals"> | <img src="docs/screenshot-analytics.png" alt="Analytics view showing Core Web Vitals, API latency percentiles and cache hit rate"> |
@@ -370,9 +374,37 @@ feature-detected and degrade quietly.
 
 ## Data & credits
 
-Weather, geocoding and air quality from [OpenWeatherMap](https://openweathermap.org/).
-Place coordinates compiled by hand for this project. Weather icons, UI icons, app icons
-and the social preview were all authored for this repository — no icon library.
+| Source | Used for | Key needed |
+|---|---|---|
+| [Open-Meteo](https://open-meteo.com/) | Forecast, air quality, geocoding, historical reanalysis | No |
+| [Copernicus GloFAS](https://global-flood.emergency.copernicus.eu/) (via Open-Meteo) | River discharge for flood risk | No |
+| [USGS Earthquake Hazards Program](https://earthquake.usgs.gov/) | Seismic events, tsunami flags, PAGER alerts | No |
+| [BigDataCloud](https://www.bigdatacloud.com/) | Reverse geocoding outside Malaysia | No |
+| [OpenWeatherMap](https://openweathermap.org/) | Optional alternative provider | Yes |
+
+Thresholds follow [MetMalaysia](https://www.met.gov.my/) warning criteria and the
+[Malaysian DOE](https://www.doe.gov.my/) Air Pollutant Index. Gauge-level flood data
+belongs to [JPS InfoBanjir](https://publicinfobanjir.water.gov.my/), which the app links
+to rather than trying to replace.
+
+The 206 Malaysian place coordinates were compiled by hand for this project. Every weather
+icon, UI icon, app icon and the social preview were authored for this repository — no
+icon library.
+
+## Testing
+
+Everything is verified where it can be, and nothing is claimed that isn't:
+
+| Job | What it proves |
+|---|---|
+| **Syntax & assets** | Every JS file parses; the manifest is valid JSON; every path referenced by `index.html` and the manifest exists |
+| **API contracts** | Calls all nine external endpoints for real and fails if a field the app reads disappears. Also runs daily, because an API can change on a day with no commits |
+| **End-to-end** | Drives the real site in Chromium against live APIs: rendered temperature, five forecast cards, a painted chart, the computed Air Pollutant Index, the hazard sweep, the earthquake feed, GloFAS, the assistant, the 30-year climate computation, a physical-plausibility bound on the climate anomaly, that nothing marked `[hidden]` is visible, a clean console, no failed requests, and zero horizontal overflow at 390px across all five views |
+| **Live site** | After each deploy, fetches the published URL and fails unless it returns 200 and serves the app and its assets |
+
+That last category exists because this project was built in a sandbox whose egress policy
+blocks every one of these hosts. Rather than assert correctness it could not observe, the
+verification was moved to where the network works.
 
 ## License
 

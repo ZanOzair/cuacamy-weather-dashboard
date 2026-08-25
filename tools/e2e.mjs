@@ -189,6 +189,14 @@ for (const view of ['dashboard', 'alerts', 'climate', 'explore', 'analytics']) {
   check(`No horizontal overflow at 390px — ${view}`, overflow <= 0, `${overflow}px`);
 }
 
+// [hidden] is a user-agent rule, so any author `display` declaration silently
+// overrides it. Assert nothing marked hidden is actually on screen.
+const leaking = await page.evaluate(() =>
+  [...document.querySelectorAll('[hidden]')]
+    .filter((n) => getComputedStyle(n).display !== 'none')
+    .map((n) => n.tagName.toLowerCase() + (n.id ? '#' + n.id : '')));
+check('Nothing marked [hidden] is visible', leaking.length === 0, leaking.join(', '));
+
 // Console must be clean. Firebase is optional and absent here by design.
 const realErrors = consoleErrors.filter((e) => !/firebase|config\.js/i.test(e));
 check('No console errors', realErrors.length === 0, realErrors.slice(0, 3).join(' | '));

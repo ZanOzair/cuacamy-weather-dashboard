@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # The app talks to third-party APIs with no backend in between, so an
+    # upstream change would otherwise only surface as a silently broken page.
+    - cron: '17 21 * * *'
 
 permissions:
   contents: read
@@ -39,6 +43,9 @@ jobs:
           done
           [ $status -eq 0 ] && echo "all referenced assets present"
           exit $status
+
+      - name: External API contract tests
+        run: node tools/api-contract.mjs --dump
 
       - name: Warn if an API key is committed
         run: |

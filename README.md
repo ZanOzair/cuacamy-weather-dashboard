@@ -10,6 +10,7 @@ No framework. No bundler. No `node_modules`. No build step.
 *Cuaca* is Malay for *weather*.
 
 [![CI](https://github.com/ZanOzair/cuacamy-weather-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/ZanOzair/cuacamy-weather-dashboard/actions/workflows/ci.yml)
+[![Publish site](https://github.com/ZanOzair/cuacamy-weather-dashboard/actions/workflows/pages.yml/badge.svg)](https://github.com/ZanOzair/cuacamy-weather-dashboard/actions/workflows/pages.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)
 ![Vanilla JS](https://img.shields.io/badge/vanilla-HTML%20%C2%B7%20CSS%20%C2%B7%20JS-f7df1e)
@@ -44,7 +45,6 @@ A weather dashboard for Malaysia that behaves like a real product, not a tutoria
 ## Live demo
 
 **→ https://zanozair.github.io/cuacamy-weather-dashboard/**
-*(live once GitHub Pages is switched on — see [Deployment](#deployment))*
 
 The demo runs without an API key. Rather than showing an empty shell, it generates
 deterministic tropical weather from a seeded PRNG, so every feature — charts, forecast,
@@ -143,17 +143,39 @@ Two workflows, deliberately separate:
   the JavaScript, validates the manifest, verifies every asset referenced by `index.html`
   and the manifest actually exists, and warns if an API key has been committed. This is
   what the build badge tracks.
-- [`pages.yml`](.github/workflows/pages.yml) — publishes to GitHub Pages.
+- [`pages.yml`](.github/workflows/pages.yml) — publishes to GitHub Pages on every push to
+  `main`, then verifies the deployed site over the network.
 
-**One-time setup before the first deploy:**
+`pages.yml` publishes by pushing the site to the `gh-pages` branch, then a second job
+fetches the live URL and fails the build unless it returns `200`, contains the app, and
+serves `app.js`, `style.css`, the manifest, the service worker and an icon. Deployment is
+therefore proven on every push, not assumed.
 
-> **Settings → Pages → Build and deployment → Source → “GitHub Actions”**
+<details>
+<summary><strong>Why push a branch instead of using <code>actions/deploy-pages</code>?</strong></summary>
 
-This step cannot be automated. A repository's `GITHUB_TOKEN` is not allowed to create a
-Pages site — the API answers `Resource not accessible by integration` — so
-`actions/configure-pages` with `enablement: true` does not work around it either. Until
-Pages is switched on, the deploy workflow fails by design; CI is kept in a separate
-workflow so the badge above reflects the code, not the hosting setup.
+`actions/deploy-pages` publishes through the `github-pages` environment. When Pages is
+served from a branch, that environment admits only the branch it serves, so a run
+triggered from `main` is rejected before it starts:
+
+```
+Branch "main" is not allowed to deploy to github-pages
+due to environment protection rules.
+```
+
+Two neighbouring approaches fail for their own reasons, and both are worth knowing:
+
+- A repository's `GITHUB_TOKEN` may not *create* a Pages site — the API answers
+  `Resource not accessible by integration` — so `actions/configure-pages` with
+  `enablement: true` cannot bootstrap Pages on a fresh repo.
+- The publish step deliberately excludes `.github/` from the copied tree. A
+  `GITHUB_TOKEN` push is refused outright if it would add or modify anything under
+  `.github/workflows`, which would otherwise break the job on every run.
+
+Pushing the branch touches none of that machinery, so it works regardless of how Pages
+was switched on.
+
+</details>
 
 Because it is pure static files, it also drops onto Netlify, Vercel, Cloudflare Pages or
 any web server unchanged — no configuration, no build command.

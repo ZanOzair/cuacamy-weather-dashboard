@@ -154,11 +154,25 @@ const climate = await page.evaluate(() => ({
   shown: !document.querySelector('#climate-body')?.hidden,
   normalTemp: document.querySelector('#climate-normal-temp')?.textContent,
   normalRain: document.querySelector('#climate-normal-rain')?.textContent,
+  actualTemp: document.querySelector('#climate-actual-temp')?.textContent,
+  actualRain: document.querySelector('#climate-actual-rain')?.textContent,
   anom: document.querySelector('#climate-temp-anom')?.textContent,
+  rainAnom: document.querySelector('#climate-rain-anom')?.textContent,
+  note: document.querySelector('#climate-note')?.textContent,
   status: document.querySelector('#climate-status')?.textContent
 }));
 check('Climate normal computed from the 1991-2020 archive', climate.shown,
-      climate.shown ? `${climate.normalTemp} / ${climate.normalRain} / ${climate.anom}` : climate.status);
+      climate.shown ? `normal ${climate.normalTemp} / observed ${climate.actualTemp} / ${climate.anom}` : climate.status);
+if (climate.shown) {
+  notes.push(`Climate — normal ${climate.normalTemp}, observed ${climate.actualTemp}, ${climate.anom}`);
+  notes.push(`Climate — rain normal ${climate.normalRain}, observed ${climate.actualRain}, ${climate.rainAnom}`);
+  notes.push(`Climate note: ${(climate.note || '').slice(0, 160)}`);
+  // A monthly mean temperature anomaly beyond 3 °C in the tropics is far more
+  // likely to be a bug in the comparison than real weather, so treat it as one.
+  const a = parseFloat((climate.anom || '').replace(/[^0-9.+-]/g, ''));
+  check('Temperature anomaly is physically plausible', Number.isFinite(a) && Math.abs(a) <= 3,
+        `${climate.anom} (normal ${climate.normalTemp}, observed ${climate.actualTemp})`);
+}
 
 // Every view, on a phone, with no horizontal overflow.
 const mobile = await context.newPage();

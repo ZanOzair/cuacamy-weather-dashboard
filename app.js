@@ -4777,7 +4777,7 @@ function attachHover(canvas, getPoints, formatRow) {
 }
 
 /** Shared frame: padding, scales, recessive grid, axis labels. */
-function plotFrame(ctx, w, h, { lo, hi, padL = 46, padR = 16, padT = 18, padB = 30, ticks = 4, fmt = (v) => Math.round(v) }) {
+function plotFrame(ctx, w, h, { lo, hi, padL = 46, padR = 16, padT = 18, padB = 30, ticks = 4, format = (v) => Math.round(v) }) {
   const plotW = w - padL - padR;
   const plotH = h - padT - padB;
   const span = (hi - lo) || 1;
@@ -4794,14 +4794,14 @@ function plotFrame(ctx, w, h, { lo, hi, padL = 46, padR = 16, padT = 18, padB = 
     const v = lo + (span / ticks) * i;
     const gy = Math.round(y(v)) + 0.5;
     ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(w - padR, gy); ctx.stroke();
-    ctx.fillText(fmt(v), padL - 8, gy);
+    ctx.fillText(format(v), padL - 8, gy);
   }
   return { padL, padR, padT, padB, plotW, plotH, y };
 }
 
 /* ── Multi-series time series ─────────────────────────────────────────────── */
 
-function drawTimeSeries(canvasId, { rows, series, unit, fmt = (v) => Math.round(v) }) {
+function drawTimeSeries(canvasId, { rows, series, unit, format = (v) => Math.round(v) }) {
   const canvas = $('#' + canvasId);
   if (!canvas || canvas.offsetParent === null) return;
   const { ctx, w, h } = setupCanvas(canvas);
@@ -4813,7 +4813,7 @@ function drawTimeSeries(canvasId, { rows, series, unit, fmt = (v) => Math.round(
   const pad = (hi - lo) * 0.12 || 1;
   lo -= pad; hi += pad;
 
-  const F = plotFrame(ctx, w, h, { lo, hi, fmt });
+  const F = plotFrame(ctx, w, h, { lo, hi, format });
   const x = (i) => F.padL + (rows.length === 1 ? F.plotW / 2 : (i / (rows.length - 1)) * F.plotW);
 
   // Night shading, so the diurnal rhythm is legible without reading the axis.
@@ -4900,7 +4900,7 @@ function drawTimeSeries(canvasId, { rows, series, unit, fmt = (v) => Math.round(
     if (r.localDay === lastDay) return;
     lastDay = r.localDay;
     if (i === 0) return;
-    ctx.fillText(fmt.dayLabel ? fmt.dayLabel(r) : fmt2Day(r), x(i), h - 18);
+    ctx.fillText(dayTick(r), x(i), h - 18);
   });
 
   ctx.textAlign = 'left';
@@ -4910,25 +4910,25 @@ function drawTimeSeries(canvasId, { rows, series, unit, fmt = (v) => Math.round(
   attachHover(canvas,
     () => rows.map((r, i) => ({ x: x(i), datum: r })),
     (r) => [
-      el('strong', { textContent: fmt.dayLabel ? fmt.dayLabel(r) : fmt2Day(r) + ' ' + fmt.clock2(r) }),
+      el('strong', { textContent: `${dayTick(r)} ${fmt.clock(r.dt, r.tz)}` }),
       ...series.map((s, si) => {
         const row = el('span', { className: 'viz-tip__row' });
         const dot = el('i', { className: 'viz-tip__dot' });
         dot.style.setProperty('background', vizSeries(si));
         row.appendChild(dot);
         row.appendChild(document.createTextNode(
-          `${s.label}: ${typeof r[s.field] === 'number' ? fmt(r[s.field]) + unit : '—'}`));
+          `${s.label}: ${typeof r[s.field] === 'number' ? format(r[s.field]) + unit : '—'}`));
         return row;
       })
     ]);
 }
 
-const fmt2Day = (r) => fmt.dayName(r.dt, r.tz) + ' ' + fmt.dayDate(r.dt, r.tz).split(' ')[0];
-fmt.clock2 = (r) => fmt.clock(r.dt, r.tz);
+/** Short day tick for a record, e.g. "Wed 27". */
+const dayTick = (r) => `${fmt.dayName(r.dt, r.tz)} ${fmt.dayDate(r.dt, r.tz).split(' ')[0]}`;
 
 /* ── Single-series bars ───────────────────────────────────────────────────── */
 
-function drawBars(canvasId, { items, valueOf, labelOf, unit, colorOf, fmt = (v) => round(v, 1) }) {
+function drawBars(canvasId, { items, valueOf, labelOf, unit, colorOf, format = (v) => round(v, 1) }) {
   const canvas = $('#' + canvasId);
   if (!canvas || canvas.offsetParent === null) return;
   const { ctx, w, h } = setupCanvas(canvas);
@@ -4936,7 +4936,7 @@ function drawBars(canvasId, { items, valueOf, labelOf, unit, colorOf, fmt = (v) 
 
   const values = items.map(valueOf);
   const hi = Math.max(...values, 0.001) * 1.15;
-  const F = plotFrame(ctx, w, h, { lo: 0, hi, ticks: 3, fmt });
+  const F = plotFrame(ctx, w, h, { lo: 0, hi, ticks: 3, format });
   const slot = F.plotW / items.length;
   // A 2px gap between adjacent fills keeps them from reading as one mass.
   const barW = Math.max(2, slot - 2);
@@ -4969,7 +4969,7 @@ function drawBars(canvasId, { items, valueOf, labelOf, unit, colorOf, fmt = (v) 
     () => items.map((item, i) => ({ x: F.padL + i * slot + slot / 2, datum: item })),
     (item, i) => [
       el('strong', { textContent: labelOf(item, i) }),
-      el('span', { className: 'viz-tip__row', textContent: `${fmt(valueOf(item))}${unit}` })
+      el('span', { className: 'viz-tip__row', textContent: `${format(valueOf(item))}${unit}` })
     ]);
 }
 
@@ -5041,7 +5041,7 @@ function drawWindRose(canvasId, rose) {
 
 /* ── Diurnal profile ──────────────────────────────────────────────────────── */
 
-function drawDiurnal(canvasId, buckets, { unit, fmt = (v) => round(v, 1), asBars = false }) {
+function drawDiurnal(canvasId, buckets, { unit, format = (v) => round(v, 1), asBars = false }) {
   const canvas = $('#' + canvasId);
   if (!canvas || canvas.offsetParent === null) return;
   const { ctx, w, h } = setupCanvas(canvas);
@@ -5052,7 +5052,7 @@ function drawDiurnal(canvasId, buckets, { unit, fmt = (v) => round(v, 1), asBars
   let hi = Math.max(...values);
   if (!asBars) { const p = (hi - lo) * 0.15 || 1; lo -= p; hi += p; } else hi *= 1.15;
 
-  const F = plotFrame(ctx, w, h, { lo, hi, ticks: 3, fmt });
+  const F = plotFrame(ctx, w, h, { lo, hi, ticks: 3, format });
   const slot = F.plotW / 24;
 
   if (asBars) {
@@ -5088,7 +5088,7 @@ function drawDiurnal(canvasId, buckets, { unit, fmt = (v) => round(v, 1), asBars
       ctx.fillStyle = vizInk.secondary();
       ctx.font = '600 10px system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`${tag} ${fmt(b.mean)}${unit}`, px, F.y(b.mean) - 12);
+      ctx.fillText(`${tag} ${format(b.mean)}${unit}`, px, F.y(b.mean) - 12);
     }
   }
 
@@ -5107,7 +5107,7 @@ function drawDiurnal(canvasId, buckets, { unit, fmt = (v) => round(v, 1), asBars
     (b) => [
       el('strong', { textContent: `${String(b.hour).padStart(2, '0')}:00` }),
       el('span', { className: 'viz-tip__row',
-                   textContent: typeof b.mean === 'number' ? `${fmt(b.mean)}${unit} (mean of ${b.n})` : 'no data' })
+                   textContent: typeof b.mean === 'number' ? `${format(b.mean)}${unit} (mean of ${b.n})` : 'no data' })
     ]);
 }
 
@@ -5198,7 +5198,7 @@ function paintAnalysis(data) {
   const dTemp = diurnal(hours, 'temp');
   const dPop = diurnal(hours, 'pop');
   registerChart('wx-diurnal-temp', () => drawDiurnal('wx-diurnal-temp', dTemp, { unit: U }));
-  registerChart('wx-diurnal-rain', () => drawDiurnal('wx-diurnal-rain', dPop, { unit: '%', asBars: true, fmt: (v) => Math.round(v) }));
+  registerChart('wx-diurnal-rain', () => drawDiurnal('wx-diurnal-rain', dPop, { unit: '%', asBars: true, format: (v) => Math.round(v) }));
 
   const hottest = dTemp.reduce((m, b) => (b.mean > (m?.mean ?? -Infinity) ? b : m), null);
   const coolest = dTemp.reduce((m, b) => (b.mean < (m?.mean ?? Infinity) ? b : m), null);
@@ -5287,7 +5287,7 @@ function paintAnalysis(data) {
     rows: hours,
     series: [{ field: 'pressure', label: 'MSL pressure' }],
     unit: ' hPa',
-    fmt: (v) => Math.round(v)
+    format: (v) => Math.round(v)
   }));
   const pStats = describe(hours.map((r) => r.pressure));
   $('#wx-pressure-insight').textContent = tend
@@ -5304,7 +5304,7 @@ function paintAnalysis(data) {
     valueOf: (r) => r.hours,
     labelOf: (r) => r.band.label,
     unit: ' h',
-    fmt: (v) => Math.round(v),
+    format: (v) => Math.round(v),
     // Heat stress is a state, not a series, so it uses the reserved status
     // colours — and every bar is labelled, never colour alone.
     colorOf: (r) => themeColor(

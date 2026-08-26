@@ -42,7 +42,7 @@ A weather dashboard for Malaysia that behaves like a real product, not a tutoria
 | **Navigation** | One-tap **Waze** and **Google Maps** deep links that hand off to the native app on mobile. |
 | **Accounts** | Sign up, sign in and sign out — locally with WebCrypto, or through Firebase with Google sign-in. |
 | **Sync** | Saved places and preferences persist in IndexedDB and mirror to Cloud Firestore when signed in. |
-| **Analytics** | A live Core Web Vitals dashboard, API latency percentiles, cache hit rate and a personal usage chart — all measured in-browser, none of it sent anywhere. |
+| **Weather analysis** | 336 hourly observations — 7 days behind, 7 ahead — put through the standard meteorological treatments: descriptive statistics, diurnal cycles, rainfall structure, a wind rose, pressure tendency, WBGT heat stress and correlations. |
 | **Offline** | Full PWA: installable, service-worker cached, and usable in aeroplane mode. |
 
 ---
@@ -117,6 +117,11 @@ Without configuration the app uses **local accounts**. Supply a Firebase config 
 `config.js` and it switches to **Firebase Authentication** (email/password *and*
 Google sign-in) with saved places synced to Cloud Firestore. Nothing else changes —
 both back ends sit behind one interface.
+
+**Google sign-in** needs an identity provider, which a static site cannot supply on its
+own. Setting it up no longer means editing a file: open **Settings**, paste your Firebase
+web config into the Firebase field, and the app validates it and reloads. It accepts the
+JavaScript object literal the Firebase console shows as well as strict JSON.
 
 <details>
 <summary><strong>Firebase setup, step by step</strong></summary>
@@ -235,11 +240,14 @@ read top to bottom:
 | 11 | Data orchestration | 23 | Service worker |
 | 12 | Dashboard rendering | 24 | Boot |
 | 06B | **Open-Meteo provider** | 25 | **Monsoon & season** |
-| | | 26 | **Hazard engine** |
+| 16 | App diagnostics | 26 | **Hazard engine** |
 | | | 27 | **Alerting** |
 | | | 28 | **Climate normals** |
 | | | 29 | **Analytical assistant** |
 | | | 30 | **Alerts / climate rendering** |
+| | | 31 | **Weather analysis** |
+| | | 32 | **Analysis charts** |
+| | | 33 | **Analysis view** |
 
 ### The network layer
 
@@ -289,6 +297,43 @@ Two honest limits, stated in the UI as well as here:
 - GloFAS is a continental-scale model. It is an **early signal that a river is running
   high**, not a forecast that your street will flood. The app links to
   [JPS InfoBanjir](https://publicinfobanjir.water.gov.my/) for actual gauge readings.
+
+### What the analysis actually computes
+
+The Weather analysis tab is meteorology, not site telemetry. Over a fortnight of hourly
+observations it derives:
+
+| Section | Method |
+|---|---|
+| Temperature | Mean, median, min, max, standard deviation, P10/P90 for air, apparent and dew-point temperature, plus a least-squares trend in degrees per day |
+| Diurnal cycle | Every observation bucketed by hour of local day, revealing the daily temperature and convective-rain rhythm |
+| Rainfall | Totals, wet-hour fraction, peak and mean intensity while raining, dry/wet spell lengths, and the wettest day |
+| Wind | A 16-sector rose over four speed bands, with prevailing direction, percentiles and calm fraction |
+| Pressure | Mean sea-level pressure and the 3-hour tendency, read against the traditional 3 hPa storm threshold |
+| Heat stress | Estimated **Wet Bulb Globe Temperature** — the occupational heat-stress standard, which matters far more than air temperature in humid air — banded with the work-rest guidance each band implies, alongside the NOAA/Rothfusz heat index |
+| Relationships | Pearson correlations between temperature, humidity, cloud, radiation, pressure, rain and wind, with strength and direction |
+| Sky | Cloud cover, clear-daylight fraction, peak and mean UV, and visibility extremes |
+
+Each section states its finding in prose and is followed by the table of numbers behind
+it. WBGT is *estimated* from temperature, humidity, radiation and wind rather than
+measured with a black-globe thermometer, and the UI says so.
+
+### How the charts were built
+
+To a checked standard rather than to taste:
+
+- The three categorical hues were **validated before adoption** for colour-vision
+  separation (worst adjacent ΔE 9.4 deutan) and contrast against both surfaces. They are
+  assigned by identity — slot 1 is always the primary measure — and never cycled.
+- **No chart has a second y-axis.** Cumulative rainfall is its own figure rather than a
+  line laid over the daily bars, because a dual axis lets the author choose where two
+  series appear to cross.
+- Wind-speed bands step along **one hue, light to dark**, because speed is a magnitude,
+  not an identity.
+- Every multi-series chart carries a legend *and* end-of-series direct labels, so identity
+  never rests on colour alone — and every figure is paired with a table view.
+- Line charts ship a crosshair and tooltip; night hours are shaded and the
+  observed/forecast boundary is marked.
 
 ### Why the assistant is not an LLM
 

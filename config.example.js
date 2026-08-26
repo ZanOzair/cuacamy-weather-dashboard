@@ -37,6 +37,30 @@ export default {
   //   appId: '1:000000000000:web:abcdef'
   // },
 
+  /* ---------------------------------------------------------------------
+   * Google sign-in WITHOUT Firebase.
+   *
+   * An OAuth 2.0 Web client ID is all "Sign in with Google" actually needs:
+   * free, no billing account, no Firebase project. Create one at
+   * https://console.cloud.google.com/apis/credentials and authorise your
+   * site's origin (e.g. https://yourname.github.io) under both
+   * "Authorised JavaScript origins" and "Authorised redirect URIs".
+   *
+   * A client ID is a public identifier, not a secret — it is meant to be
+   * visible in the page, and it only works from the origins you authorised.
+   *
+   * You can also paste this into the in-app setup wizard instead: open the
+   * account dialog and press "Set up Google sign-in".
+   * ------------------------------------------------------------------- */
+  googleClientId: '',
+  // googleClientId: '1234567890-abcdefg.apps.googleusercontent.com',
+
+  /* ---------------------------------------------------------------------
+   * The account that may open the admin database panel. Leave blank and the
+   * first account created on a device owns it.
+   * ------------------------------------------------------------------- */
+  adminEmail: '',
+
   /* Optional Google Maps Platform key. The app's map links work without it. */
   googleMapsKey: '',
 

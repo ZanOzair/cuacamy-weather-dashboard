@@ -31,7 +31,7 @@
  * 01 · CONFIGURATION & CONSTANTS
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 /**
  * Runtime configuration, resolved in priority order:
@@ -46,6 +46,9 @@ const VERSION = '1.1.0';
 const CONFIG = {
   openWeatherKey: '',
   firebase: null,          // paste your Firebase web config object here
+  googleClientId: '',      // an OAuth 2.0 Web client ID turns on Google sign-in
+                           // WITHOUT Firebase — see the wizard in Settings
+  adminEmail: '',          // this account sees the admin database view
   googleMapsKey: '',       // optional; only used to build richer map links
   defaultCity: { name: 'Kuala Lumpur', state: 'W.P. Kuala Lumpur', country: 'MY', lat: 3.1390, lon: 101.6869 }
 };
@@ -65,7 +68,10 @@ const LS = {
   apiKey:    'cuacamy.apikey.v1',
   session:   'cuacamy.session.v1',
   analytics: 'cuacamy.analytics.v1',
-  lastPlace: 'cuacamy.lastplace.v1'
+  lastPlace: 'cuacamy.lastplace.v1',
+  googleId:  'cuacamy.googleclient.v1',
+  notifLog:  'cuacamy.notifications.v1',
+  admin:     'cuacamy.admin.v1'
 };
 
 /** How long each kind of response stays fresh in the local cache (ms). */
@@ -397,17 +403,249 @@ function comfortLabel(dewC) {
   return 'Oppressive — stay hydrated';
 }
 
-/* ── Toast notifications ──────────────────────────────────────────────────── */
+/* ── Toast notifications ──────────────────────────────────────────────────
+ * One function, three shapes of call:
+ *
+ *   toast('Saved')                          — plain, auto-dismisses
+ *   toast('Saved', 'success')               — coloured by type
+ *   toast('...', 'warn', { sticky: true, title, action, id })
+ *
+ * The third argument accepts either a duration in milliseconds (the old
+ * signature, still used all over the app) or an options object, so nothing
+ * had to be rewritten when the richer behaviour was added.
+ *
+ * Design rules this enforces, because the previous version broke all four:
+ *   • At most MAX_VISIBLE on screen; the rest queue instead of covering the UI.
+ *   • Every toast is dismissable, and a sticky one never disappears on its own.
+ *   • Hovering or focusing a toast pauses its timer — you cannot lose a
+ *     message by reading it slowly.
+ *   • An `id` collapses repeats, so a hazard that re-fires every refresh does
+ *     not stack forty copies.
+ * ---------------------------------------------------------------------------- */
 
-function toast(message, type = 'info', ms = 4200) {
+const TOAST_MAX_VISIBLE = 4;
+const toastQueue = [];
+const toastLive = new Map();      // id → node
+
+const TOAST_ICON = {
+  info: 'i-info', success: 'i-check', warn: 'i-alert', error: 'i-alert', hazard: 'i-siren'
+};
+
+function toast(message, type = 'info', opts = 4200) {
+  const o = typeof opts === 'number' ? { ms: opts } : (opts || {});
+  const item = {
+    message: String(message),
+    type,
+    ms: o.sticky ? 0 : (o.ms ?? 4200),
+    title: o.title || '',
+    action: o.action || null,
+    id: o.id || null,
+    onClose: o.onClose || null,
+    // A toast that reports on the notification log itself must not be written
+    // into it — "Cleared" would immediately un-clear the list.
+    silent: o.silent === true
+  };
+
+  if (!item.silent) Notifications.log(item);
+
+  // De-duplication has to cover the queue as well as the screen. Checking only
+  // what is visible let a hazard that re-fires on every refresh pile up
+  // invisibly, then flush a dozen identical warnings at once.
+  if (item.id) {
+    if (toastLive.has(item.id)) dismissToast(toastLive.get(item.id), true);
+    for (let i = toastQueue.length - 1; i >= 0; i -= 1) {
+      if (toastQueue[i].id === item.id) toastQueue.splice(i, 1);
+    }
+  }
+
+  // Urgency jumps the queue. A hazard warning must never wait behind four
+  // "Saved place" confirmations — if the screen is full, the oldest
+  // dismissable toast gives up its slot.
+  const urgent = item.type === 'hazard' || item.type === 'error' || item.ms === 0;
+
+  if (toastLive.size >= TOAST_MAX_VISIBLE) {
+    if (!urgent) { toastQueue.push(item); return; }
+    const evictable = [...toastLive.values()].find((n) => n._toast && n._toast.ms > 0);
+    if (evictable) dismissToast(evictable, true);
+    else { toastQueue.unshift(item); return; }
+  }
+  showToast(item);
+}
+
+function showToast(item) {
   const host = $('#toasts');
   if (!host) return;
-  const node = el('div', { className: 'toast', dataset: { type } }, [message]);
+
+  const node = el('div', { className: 'toast', dataset: { type: item.type } });
+  node.setAttribute('role', item.type === 'error' || item.type === 'hazard' ? 'alert' : 'status');
+
+  node.appendChild(icon(TOAST_ICON[item.type] || TOAST_ICON.info, 'toast__icon'));
+
+  const body = el('div', { className: 'toast__body' });
+  if (item.title) body.appendChild(el('strong', { className: 'toast__title', textContent: item.title }));
+  body.appendChild(el('p', { className: 'toast__msg', textContent: item.message }));
+
+  if (item.action) {
+    body.appendChild(el('button', {
+      type: 'button', className: 'toast__action', textContent: item.action.label,
+      onclick: () => { try { item.action.onClick(); } finally { dismissToast(node); } }
+    }));
+  }
+  node.appendChild(body);
+
+  const close = el('button', {
+    type: 'button', className: 'toast__close', title: 'Dismiss', onclick: () => dismissToast(node)
+  }, [icon('i-close')]);
+  close.setAttribute('aria-label', 'Dismiss notification');
+  node.appendChild(close);
+
+  node._toast = item;
   host.appendChild(node);
-  setTimeout(() => {
-    node.classList.add('is-out');
-    node.addEventListener('animationend', () => node.remove(), { once: true });
-  }, ms);
+  if (item.id) toastLive.set(item.id, node);
+  else toastLive.set(node, node);
+
+  if (item.ms > 0) {
+    // A progress bar makes the remaining time visible instead of a surprise.
+    const bar = el('span', { className: 'toast__timer' });
+    bar.style.setProperty('animation-duration', item.ms + 'ms');
+    node.appendChild(bar);
+    startToastTimer(node, item.ms);
+
+    const pause = () => { clearTimeout(node._timer); bar.style.setProperty('animation-play-state', 'paused'); };
+    const resume = () => { bar.style.setProperty('animation-play-state', 'running'); startToastTimer(node, 1400); };
+    node.addEventListener('mouseenter', pause);
+    node.addEventListener('mouseleave', resume);
+    node.addEventListener('focusin', pause);
+    node.addEventListener('focusout', resume);
+  }
+}
+
+function startToastTimer(node, ms) {
+  clearTimeout(node._timer);
+  node._timer = setTimeout(() => dismissToast(node), ms);
+}
+
+function dismissToast(node, immediate = false) {
+  if (!node || node._gone) return;
+  node._gone = true;
+  clearTimeout(node._timer);
+
+  const item = node._toast;
+  if (item && item.id) toastLive.delete(item.id);
+  toastLive.delete(node);
+  if (item && item.onClose) { try { item.onClose(); } catch { /* never let a callback break dismissal */ } }
+
+  // animationend does not fire in a background tab, so there is a timeout
+  // behind it — which means drain can be called twice and must be idempotent.
+  // Without this guard one dismissal pulled two toasts off the queue.
+  let drained = false;
+  const drain = () => {
+    if (drained) return;
+    drained = true;
+    node.remove();
+    const next = toastQueue.shift();
+    if (next) showToast(next);
+  };
+
+  if (immediate || state.reduceMotion) { drain(); return; }
+  node.classList.add('is-out');
+  node.addEventListener('animationend', drain, { once: true });
+  setTimeout(drain, 400);
+}
+
+/**
+ * The notification centre. Toasts are ephemeral by nature, which is wrong for
+ * a flood warning you glanced at while driving. Every notification is also
+ * written to a rolling log that survives a reload, readable from the bell in
+ * the top bar, with unread counting.
+ */
+const Notifications = {
+  MAX: 60,
+  items: [],
+  unread: 0,
+
+  restore() {
+    const saved = safeLocal.json(LS.notifLog, null);
+    if (saved && Array.isArray(saved.items)) {
+      this.items = saved.items.slice(0, this.MAX);
+      this.unread = Number(saved.unread) || 0;
+    }
+    this.paint();
+  },
+
+  persist() {
+    safeLocal.set(LS.notifLog, JSON.stringify({ items: this.items.slice(0, this.MAX), unread: this.unread }));
+  },
+
+  log(item) {
+    // Status chatter does not belong in a log people read.
+    if (item.type === 'info' && !item.title && !item.action) return;
+    this.items.unshift({
+      at: Date.now(),
+      type: item.type,
+      title: item.title || '',
+      message: item.message
+    });
+    if (this.items.length > this.MAX) this.items.length = this.MAX;
+    this.unread += 1;
+    this.persist();
+    this.paint();
+  },
+
+  markRead() { this.unread = 0; this.persist(); this.paint(); },
+
+  clear() { this.items = []; this.unread = 0; this.persist(); this.paint(); },
+
+  paint() {
+    const badge = $('#notif-count');
+    if (badge) {
+      badge.textContent = this.unread > 99 ? '99+' : String(this.unread);
+      badge.hidden = this.unread === 0;
+    }
+    const list = $('#notif-list');
+    if (!list) return;
+    list.textContent = '';
+
+    if (!this.items.length) {
+      list.appendChild(el('p', {
+        className: 'empty',
+        textContent: 'Nothing yet. Weather warnings, hazard alerts and app updates will collect here so you can read them in your own time.'
+      }));
+      return;
+    }
+    for (const n of this.items) {
+      const row = el('li', { className: 'notif', dataset: { type: n.type } }, [
+        icon(TOAST_ICON[n.type] || TOAST_ICON.info, 'notif__icon'),
+        el('div', { className: 'notif__body' }, [
+          el('strong', { textContent: n.title || titleCaseType(n.type) }),
+          el('p', { textContent: n.message }),
+          el('time', { className: 'notif__time', textContent: fmt.relative(n.at) })
+        ])
+      ]);
+      list.appendChild(row);
+    }
+  }
+};
+
+const titleCaseType = (t) => ({
+  info: 'Notice', success: 'Done', warn: 'Advisory', error: 'Problem', hazard: 'Hazard alert'
+}[t] || 'Notice');
+
+/** Both "enable notifications" controls must always agree with reality. */
+function syncNotifyButtons(granted) {
+  const on = granted === undefined
+    ? ('Notification' in window && Notification.permission === 'granted')
+    : granted;
+  const main = $('#btn-notify');
+  if (main) {
+    main.textContent = on ? 'Device alerts are on' : 'Enable notifications';
+    main.disabled = on;
+  }
+  const panel = $('#btn-notif-enable');
+  if (panel) {
+    panel.textContent = on ? 'Device alerts are on' : 'Enable device alerts';
+    panel.disabled = on;
+  }
 }
 
 function setStatus(text) {
@@ -1628,6 +1866,159 @@ function safeEqual(a, b) {
   return diff === 0;
 }
 
+/**
+ * Google Identity Services — "Sign in with Google" without Firebase.
+ * ---------------------------------------------------------------------------
+ * Why this exists: Firebase is a fine backend, but standing one up means a
+ * project, a web app, an enabled provider and an authorised domain. That is a
+ * lot of ceremony for a static dashboard, and until it is finished the Google
+ * button does nothing — which is exactly the complaint this module answers.
+ *
+ * GIS needs one thing: an OAuth 2.0 Web client ID, free, no billing account.
+ * The flow is:
+ *
+ *   1. Load Google's client script (once, lazily — never on first paint).
+ *   2. initialize() with the client ID.
+ *   3. Google shows its own account chooser and hands back a JWT ID token.
+ *   4. We send that token to Google's tokeninfo endpoint, which verifies the
+ *      signature and returns the claims.
+ *
+ * Step 4 matters. A static site has no server, so it cannot check the token's
+ * RSA signature itself; decoding the payload and believing it would accept any
+ * forged token a visitor cared to paste in. Asking Google to validate it, and
+ * then checking that `aud` is our own client ID and `iss` is Google, closes
+ * that hole. It is still weaker than a real backend — a determined user can
+ * write whatever they like into their own browser's database — which is why
+ * the UI says so plainly.
+ */
+const GoogleId = {
+  _script: null,
+  _resolve: null,
+  _reject: null,
+
+  clientId() {
+    const fromConfig = (CONFIG.googleClientId || '').trim();
+    if (fromConfig) return fromConfig;
+    return (safeLocal.get(LS.googleId) || '').trim();
+  },
+
+  /** The origin the site owner must authorise in the Google Cloud console. */
+  origin() { return location.origin; },
+
+  /** Load Google's script once. Rejects rather than hanging if it is blocked. */
+  load() {
+    if (this._script) return this._script;
+    this._script = new Promise((resolve, reject) => {
+      if (window.google?.accounts?.id) { resolve(window.google.accounts.id); return; }
+      const tag = el('script', {
+        src: 'https://accounts.google.com/gsi/client',
+        async: true,
+        defer: true,
+        onload: () => window.google?.accounts?.id
+          ? resolve(window.google.accounts.id)
+          : reject(new Error('Google’s sign-in library loaded but did not initialise.')),
+        onerror: () => reject(new Error('Google’s sign-in library could not be loaded. A tracker blocker or a strict network will do this.'))
+      });
+      document.head.appendChild(tag);
+      setTimeout(() => reject(new Error('Google’s sign-in library timed out.')), 12000);
+    });
+    // A failed load must not be cached forever; the next attempt should retry.
+    this._script.catch(() => { this._script = null; });
+    return this._script;
+  },
+
+  /**
+   * Show Google's account chooser and resolve with a verified profile.
+   * `renderButton` is used rather than `prompt()` because One Tap is
+   * suppressed in a lot of situations (third-party cookies off, prior
+   * dismissal) and fails silently, which would look like another dead button.
+   */
+  async signIn() {
+    const gid = await this.load();
+    const clientId = this.clientId();
+
+    const token = await new Promise((resolve, reject) => {
+      this._resolve = resolve;
+      this._reject = reject;
+
+      try {
+        gid.initialize({
+          client_id: clientId,
+          callback: (response) => resolve(response.credential),
+          cancel_on_tap_outside: true,
+          auto_select: false,
+          ux_mode: 'popup',
+          context: 'signin'
+        });
+      } catch (err) {
+        reject(new Error('That client ID was rejected by Google: ' + err.message));
+        return;
+      }
+
+      // Google will only render into a visible element, so the host is opened
+      // first and the real button is drawn inside it.
+      const host = $('#google-host');
+      const wrap = $('#google-render');
+      if (!host || !wrap) { reject(new Error('Sign-in host missing.')); return; }
+
+      wrap.textContent = '';
+      host.hidden = false;
+      try {
+        gid.renderButton(wrap, {
+          type: 'standard', theme: 'filled_blue', size: 'large',
+          text: 'continue_with', shape: 'pill', logo_alignment: 'left',
+          width: Math.min(320, Math.max(220, wrap.clientWidth || 280))
+        });
+      } catch (err) {
+        host.hidden = true;
+        reject(new Error('Google could not draw its sign-in button: ' + err.message));
+        return;
+      }
+
+      $('#google-cancel').onclick = () => {
+        host.hidden = true;
+        reject(new Error('CANCELLED'));
+      };
+    });
+
+    $('#google-host').hidden = true;
+    return this.verify(token, clientId);
+  },
+
+  /**
+   * Ask Google to validate the token, then check the claims are for us.
+   * Never trust a decoded JWT payload on its own.
+   */
+  async verify(idToken, clientId) {
+    const res = await fetch(
+      'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken),
+      { headers: { Accept: 'application/json' } }
+    );
+    if (!res.ok) throw new Error('Google would not confirm that sign-in token.');
+    const claims = await res.json();
+
+    if (claims.aud !== clientId) throw new Error('That sign-in token was issued for a different application.');
+    if (!/^(https:\/\/)?accounts\.google\.com$/.test(String(claims.iss))) {
+      throw new Error('That sign-in token did not come from Google.');
+    }
+    if (Number(claims.exp) * 1000 < Date.now()) throw new Error('That sign-in token has already expired.');
+    if (!claims.email) throw new Error('Google did not share an email address for that account.');
+
+    return {
+      sub: claims.sub,
+      email: String(claims.email).toLowerCase(),
+      name: claims.name || '',
+      picture: claims.picture || '',
+      emailVerified: claims.email_verified === true || claims.email_verified === 'true'
+    };
+  },
+
+  /** Called on sign-out so the chooser appears again next time. */
+  reset() {
+    try { window.google?.accounts?.id?.disableAutoSelect(); } catch { /* not loaded */ }
+  }
+};
+
 const Auth = {
   mode: 'local',       // 'local' | 'firebase'
   user: null,          // { uid, email, name, photo, createdAt }
@@ -1707,9 +2098,13 @@ const Auth = {
       iterations: PBKDF2_ITERATIONS,
       uid: 'local_' + toB64(crypto.getRandomValues(new Uint8Array(9))).replace(/[^a-zA-Z0-9]/g, ''),
       name: email.split('@')[0],
-      createdAt: Date.now()
+      provider: 'password',
+      createdAt: Date.now(),
+      lastSignIn: Date.now(),
+      signInCount: 1
     };
     await IDB.put('users', record);
+    Admin.claimOwner(email);
     await this._startLocalSession(record);
     return record;
   },
@@ -1728,19 +2123,67 @@ const Auth = {
     if (!record || !safeEqual(hash, record.hash)) {
       throw new Error('That email and password combination does not match an account.');
     }
+    record.lastSignIn = Date.now();
+    record.signInCount = (record.signInCount || 0) + 1;
+    await IDB.put('users', record).catch(() => null);
     await this._startLocalSession(record);
     return record;
   },
 
+  /**
+   * Three routes to a Google account, tried in order of how much the site
+   * owner has set up:
+   *
+   *   1. Firebase, if a config is present — full server-verified accounts
+   *      with cross-device sync.
+   *   2. Google Identity Services, if only an OAuth client ID is present.
+   *      This is the cheap route: no Firebase project, no billing account,
+   *      about five minutes in the Google Cloud console. It returns a signed
+   *      ID token which GoogleId verifies with Google before we trust it.
+   *   3. Neither — throw NEEDS_SETUP, which opens the guided wizard rather
+   *      than leaving the visitor staring at a dead button.
+   */
   async signInWithGoogle() {
-    if (this.mode !== 'firebase') {
-      throw new Error('NEEDS_FIREBASE');
+    if (this.mode === 'firebase') {
+      const { GoogleAuthProvider, signInWithPopup } = this._fb.authMod;
+      const provider = new GoogleAuthProvider();
+      provider.addScope('email');
+      provider.setCustomParameters({ prompt: 'select_account' });
+      return signInWithPopup(this._fb.auth, provider);
     }
-    const { GoogleAuthProvider, signInWithPopup } = this._fb.authMod;
-    const provider = new GoogleAuthProvider();
-    provider.addScope('email');
-    provider.setCustomParameters({ prompt: 'select_account' });
-    return signInWithPopup(this._fb.auth, provider);
+
+    if (GoogleId.clientId()) {
+      const profile = await GoogleId.signIn();
+      await this._startGoogleSession(profile);
+      return profile;
+    }
+
+    throw new Error('NEEDS_SETUP');
+  },
+
+  /**
+   * A Google identity, stored the same way a local account is. There is no
+   * password: the account is proved by a token Google signed, which is why
+   * the record carries `provider: 'google'` and no hash at all.
+   */
+  async _startGoogleSession(profile) {
+    const existing = await IDB.get('users', profile.email).catch(() => null);
+    const record = {
+      email: profile.email,
+      uid: 'google_' + profile.sub,
+      name: profile.name || profile.email.split('@')[0],
+      photo: profile.picture || '',
+      provider: 'google',
+      verified: !!profile.emailVerified,
+      createdAt: existing?.createdAt || Date.now(),
+      lastSignIn: Date.now(),
+      signInCount: (existing?.signInCount || 0) + 1
+    };
+    await IDB.put('users', record).catch(() => null);
+    await this._startLocalSession(record);
+    this.user = { ...this.user, photo: record.photo, name: record.name, provider: 'google', verified: record.verified };
+    this._emit();
+    return record;
   },
 
   async signOut() {
@@ -1784,6 +2227,148 @@ function passwordScore(pw) {
 }
 
 const isValidEmail = (v) => /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(String(v).trim());
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 09B · ADMIN — where the user database actually is
+ * ---------------------------------------------------------------------------
+ * "Where is my database as admin?" is a fair question, and the honest answer
+ * for a static site is more interesting than people expect. There is no server
+ * to hold one, so accounts live in one of two places depending on how the site
+ * is configured:
+ *
+ *   Local mode      IndexedDB, database "cuacamy", object store "users", on
+ *                   each visitor's own device. That means there is no single
+ *                   central table — each browser holds its own. Good for
+ *                   privacy, useless for "how many users do I have".
+ *
+ *   Firebase mode   Cloud Firestore, collection "users", one document per
+ *                   uid, in the owner's own Google Cloud project. That IS a
+ *                   real central database, readable in the Firebase console.
+ *
+ * This module makes both visible rather than leaving the owner guessing: it
+ * reads the store, shows every record with its sign-in history, reports how
+ * much space is in use, and exports the lot as JSON or CSV. It is an
+ * inspection tool for the person running the site on their own device — it
+ * cannot, and does not pretend to, reach other visitors' browsers.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const Admin = {
+  /** The first account created on this device owns it, unless config says otherwise. */
+  claimOwner(email) {
+    if (!safeLocal.get(LS.admin)) safeLocal.set(LS.admin, String(email).toLowerCase());
+  },
+
+  ownerEmail() {
+    return (CONFIG.adminEmail || safeLocal.get(LS.admin, '') || '').toLowerCase();
+  },
+
+  isOwner() {
+    const owner = this.ownerEmail();
+    const me = (Auth.user?.email || '').toLowerCase();
+    // With no accounts at all there is nobody to hide the panel from, so the
+    // person setting the site up can still see how storage is laid out.
+    return !owner || (Boolean(me) && me === owner);
+  },
+
+  /** Every account record this device knows about. */
+  async users() {
+    try {
+      const rows = await IDB.all('users');
+      return (rows || []).map((u) => ({
+        email: u.email,
+        name: u.name || '',
+        uid: u.uid,
+        provider: u.provider || (u.hash ? 'password' : 'unknown'),
+        verified: Boolean(u.verified),
+        createdAt: u.createdAt || null,
+        lastSignIn: u.lastSignIn || null,
+        signInCount: u.signInCount || 0,
+        hashed: Boolean(u.hash),
+        iterations: u.iterations || null
+      })).sort((a, b) => (b.lastSignIn || b.createdAt || 0) - (a.lastSignIn || a.createdAt || 0));
+    } catch (err) {
+      Telemetry.record('admin', { lvl: 'warn', msg: 'Could not read the user store: ' + err.message });
+      return [];
+    }
+  },
+
+  /** Saved places per account, read from the same profile records the app uses. */
+  async profiles() {
+    try {
+      const rows = await IDB.all('kv');
+      const out = new Map();
+      for (const row of rows || []) {
+        if (!String(row.key).startsWith('profile:')) continue;
+        out.set(String(row.key).slice(8), row.value || {});
+      }
+      return out;
+    } catch { return new Map(); }
+  },
+
+  /** What the browser says this origin is using. */
+  async storage() {
+    const out = { usage: null, quota: null, persisted: null };
+    try {
+      if (navigator.storage?.estimate) {
+        const est = await navigator.storage.estimate();
+        out.usage = est.usage ?? null;
+        out.quota = est.quota ?? null;
+      }
+      if (navigator.storage?.persisted) out.persisted = await navigator.storage.persisted();
+    } catch { /* unsupported, and that is fine */ }
+    return out;
+  },
+
+  /** Ask the browser not to evict the database under storage pressure. */
+  async requestPersistence() {
+    try {
+      if (!navigator.storage?.persist) {
+        toast('This browser does not offer persistent storage.', 'warn');
+        return false;
+      }
+      const ok = await navigator.storage.persist();
+      toast(ok
+        ? 'The browser will now keep this database even when storage runs low.'
+        : 'The browser declined. It usually grants this once the site is used regularly or installed.',
+        ok ? 'success' : 'warn', { title: ok ? 'Storage protected' : 'Not granted', ms: 7000 });
+      return ok;
+    } catch { return false; }
+  },
+
+  async deleteUser(email) {
+    const record = await IDB.get('users', email).catch(() => null);
+    if (record?.uid) await IDB.del('kv', 'profile:' + record.uid).catch(() => null);
+    await IDB.del('users', email).catch(() => null);
+    if (this.ownerEmail() === String(email).toLowerCase()) safeLocal.del(LS.admin);
+    if ((Auth.user?.email || '').toLowerCase() === String(email).toLowerCase()) await Auth.signOut();
+  },
+
+  async wipe() {
+    await Promise.all([
+      IDB.clear('users').catch(() => null),
+      IDB.clear('kv').catch(() => null),
+      IDB.clear('places').catch(() => null)
+    ]);
+    safeLocal.del(LS.admin);
+    safeLocal.del(LS.session);
+    await Auth.signOut().catch(() => null);
+  },
+
+  async export() {
+    const [users, profiles, storage] = await Promise.all([this.users(), this.profiles(), this.storage()]);
+    return {
+      exportedAt: new Date().toISOString(),
+      app: 'CuacaMY ' + VERSION,
+      backend: Auth.store.kind,
+      location: Auth.mode === 'firebase'
+        ? 'Cloud Firestore, collection "users", in your own Firebase project'
+        : 'IndexedDB database "cuacamy", object store "users", on this device only',
+      storage,
+      accounts: users.map((u) => ({ ...u, savedPlaces: (profiles.get(u.uid)?.favourites || []).length })),
+      note: 'Password hashes and salts are deliberately excluded from this export.'
+    };
+  }
+};
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * 10 · APPLICATION STATE
@@ -2962,6 +3547,23 @@ function emailReport() {
   Telemetry.record('share', { lvl: 'info', msg: `Emailed report for ${state.place?.name}` });
 }
 
+/** CSV with the quoting rules that actually matter: quotes, commas, newlines. */
+function downloadCSV(filename, headers, rows) {
+  const esc = (v) => {
+    const t = v === null || v === undefined ? '' : String(v);
+    return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  const body = [headers, ...rows].map((r) => r.map(esc).join(',')).join('\r\n');
+  // The BOM is what makes Excel open UTF-8 correctly instead of mangling it.
+  const blob = new Blob(['\uFEFF' + body], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = el('a', { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function downloadJSON(filename, payload) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -3048,6 +3650,253 @@ function monsoonAffectsPlace(phase, place) {
   if (!place || place.country !== 'MY') return false;
   const code = Object.keys(MY_STATES).find((c) => MY_STATES[c] === place.state);
   return code ? phase.watch.includes(code) : false;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 25B · OFFICIAL AGENCIES — who to actually call
+ * ---------------------------------------------------------------------------
+ * A weather dashboard that spots a flood and then leaves you to Google the
+ * right department has done half a job. This is the other half: the Malaysian
+ * agencies with statutory responsibility for weather, disaster response, air
+ * quality, water, power and telecommunications, each with the number to ring
+ * and the page where a report is actually filed.
+ *
+ * Two rules govern what is in this list:
+ *
+ *   • Only official government or licensed-operator channels. No aggregators,
+ *     no news sites, no "unofficial" hotlines.
+ *   • 999 is always shown first for anything life-threatening, because the
+ *     correct answer to "there is water coming into my house right now" is
+ *     never a website.
+ *
+ * Numbers and addresses change. `checked` records when each entry was last
+ * reviewed, and the UI shows it, so nobody trusts a stale number blindly.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const AGENCY_CHECKED = '2025-08';
+
+const AGENCIES = [
+  {
+    group: 'Emergency — life-threatening situations',
+    urgent: true,
+    items: [
+      {
+        name: 'MERS 999 — police, ambulance, fire and civil defence',
+        role: 'One number for every emergency service in Malaysia. Use it for floods entering homes, people trapped, landslides, structural collapse, or anyone injured or missing.',
+        phone: '999',
+        note: 'Free from any phone, including a mobile with no credit. 112 also works from a locked mobile.',
+        site: 'https://www.mkn.gov.my/'
+      },
+      {
+        name: 'Bomba dan Penyelamat Malaysia (JBPM) — Fire and Rescue',
+        role: 'Water rescue, evacuation from flooded buildings, fires, road accident extrication, fallen trees blocking access.',
+        phone: '999',
+        alt: '03-8888 5000',
+        site: 'https://www.bomba.gov.my/'
+      },
+      {
+        name: 'Angkatan Pertahanan Awam Malaysia (APM) — Civil Defence',
+        role: 'Evacuation support, relief centre operations and search and rescue during declared disasters.',
+        phone: '03-8064 2400',
+        site: 'https://www.civildefence.gov.my/'
+      }
+    ]
+  },
+  {
+    group: 'Weather, warnings and earthquakes',
+    items: [
+      {
+        name: 'Jabatan Meteorologi Malaysia (MetMalaysia)',
+        role: 'The national meteorological authority. Issues the official rainfall, thunderstorm, strong-wind and heatwave warnings, and runs the Malaysian National Tsunami Early Warning Centre.',
+        phone: '03-7967 8000',
+        report: 'https://www.met.gov.my/en/amaran/amaran-cuaca/',
+        reportLabel: 'Official weather warnings',
+        site: 'https://www.met.gov.my/',
+        why: 'CuacaMY computes its warnings from raw model data. MetMalaysia issues the legally recognised ones — theirs are the version that counts.'
+      },
+      {
+        name: 'MetMalaysia earthquake and tsunami desk',
+        role: 'Seismic monitoring for Malaysia and the region, and tsunami warnings for the Malaysian coastline.',
+        report: 'https://www.met.gov.my/en/amaran/gempa-bumi-dan-tsunami/',
+        reportLabel: 'Earthquake and tsunami bulletins',
+        site: 'https://www.met.gov.my/'
+      }
+    ]
+  },
+  {
+    group: 'Flooding and water',
+    items: [
+      {
+        name: 'JPS InfoBanjir — Department of Irrigation and Drainage',
+        role: 'Live river levels, rainfall gauges and flood status for every basin in Malaysia. This is where an official flood warning for your river comes from.',
+        phone: '03-2691 9011',
+        report: 'https://publicinfobanjir.water.gov.my/',
+        reportLabel: 'Live river and rainfall levels',
+        site: 'https://www.water.gov.my/',
+        why: 'CuacaMY’s flood signal comes from the Copernicus GloFAS global model. JPS measures the actual rivers — always check theirs before acting.'
+      },
+      {
+        name: 'NADMA — National Disaster Management Agency',
+        role: 'Coordinates the national response to declared disasters, runs relief centres (PPS), and is the agency to contact about disaster aid.',
+        phone: '03-8870 4800',
+        report: 'https://www.nadma.gov.my/en/aduan',
+        reportLabel: 'File a disaster report',
+        site: 'https://www.nadma.gov.my/'
+      },
+      {
+        name: 'Air Selangor',
+        role: 'Water supply disruptions and contamination in Selangor, Kuala Lumpur and Putrajaya — common after heavy rain silts up the intakes.',
+        phone: '15300',
+        report: 'https://www.airselangor.com/report-an-issue/',
+        reportLabel: 'Report a water problem',
+        site: 'https://www.airselangor.com/'
+      }
+    ]
+  },
+  {
+    group: 'Air quality and haze',
+    items: [
+      {
+        name: 'Jabatan Alam Sekitar (DOE) — Department of Environment',
+        role: 'Publishes the official Air Pollutant Index (API) and takes reports of open burning, the main cause of local haze.',
+        phone: '1-800-88-2727',
+        alt: '03-8871 2000',
+        report: 'https://apims.doe.gov.my/',
+        reportLabel: 'Official API readings',
+        site: 'https://www.doe.gov.my/',
+        why: 'CuacaMY estimates the API from satellite and model particulate data. DOE runs the physical monitoring stations — theirs is the official number.'
+      },
+      {
+        name: 'Kementerian Kesihatan Malaysia (KKM) — Ministry of Health',
+        role: 'Health advice during haze and heatwaves, and the agency behind the guidance on when to keep children indoors.',
+        phone: '03-8881 0200',
+        site: 'https://www.moh.gov.my/'
+      }
+    ]
+  },
+  {
+    group: 'Power, phones and roads',
+    items: [
+      {
+        name: 'Tenaga Nasional Berhad (TNB)',
+        role: 'Power failures, fallen power lines and electrical hazards after a storm. A downed line is an emergency — keep well clear and call.',
+        phone: '15454',
+        report: 'https://www.tnb.com.my/contact-us',
+        reportLabel: 'Report an outage',
+        site: 'https://www.tnb.com.my/'
+      },
+      {
+        name: 'Suruhanjaya Komunikasi dan Multimedia Malaysia (MCMC)',
+        role: 'The telecommunications regulator. Use this when a mobile or broadband operator will not resolve an outage — including one caused by flooding or a storm.',
+        phone: '1-800-188-030',
+        report: 'https://aduan.skmm.gov.my/',
+        reportLabel: 'Complain about a telco',
+        site: 'https://www.mcmc.gov.my/'
+      },
+      {
+        name: 'Telekom Malaysia (TM / Unifi)',
+        role: 'Fixed-line and Unifi broadband faults.',
+        phone: '100',
+        site: 'https://www.tm.com.my/'
+      },
+      {
+        name: 'Maxis',
+        role: 'Mobile and home fibre faults.',
+        phone: '123',
+        note: 'Dial 123 from a Maxis line, or 03-7492 2123 from any other phone.',
+        site: 'https://www.maxis.com.my/'
+      },
+      {
+        name: 'CelcomDigi',
+        role: 'Mobile and home fibre faults.',
+        phone: '1111',
+        note: 'Dial 1111 from a Celcom line or 016-221 1800 from any other phone.',
+        site: 'https://www.celcomdigi.com/'
+      },
+      {
+        name: 'U Mobile',
+        role: 'Mobile network faults.',
+        phone: '018-388 1318',
+        site: 'https://www.u.com.my/'
+      },
+      {
+        name: 'Lembaga Lebuhraya Malaysia (LLM) — Highway Authority',
+        role: 'Flooded or blocked highways, landslides on expressways, and highway emergencies.',
+        phone: '1-800-88-7752',
+        site: 'https://www.llm.gov.my/'
+      }
+    ]
+  }
+];
+
+/** Renders the directory. Called once, then never again — it is static data. */
+function renderAgencies() {
+  const host = $('#agency-list');
+  if (!host || host.dataset.painted === '1') return;
+  host.dataset.painted = '1';
+
+  for (const section of AGENCIES) {
+    const block = el('section', { className: 'agency-group' });
+    if (section.urgent) block.classList.add('agency-group--urgent');
+    block.appendChild(el('h3', { className: 'agency-group__title', textContent: section.group }));
+
+    const list = el('ul', { className: 'agency-list' });
+    for (const a of section.items) {
+      const card = el('li', { className: 'agency' });
+
+      card.appendChild(el('h4', { className: 'agency__name', textContent: a.name }));
+      card.appendChild(el('p', { className: 'agency__role', textContent: a.role }));
+      if (a.why) card.appendChild(el('p', { className: 'agency__why', textContent: a.why }));
+
+      const actions = el('div', { className: 'agency__actions' });
+
+      if (a.phone) {
+        const call = el('a', {
+          className: 'agency__call',
+          href: 'tel:' + a.phone.replace(/[^\d+]/g, ''),
+          textContent: a.phone
+        });
+        call.prepend(icon('i-phone'));
+        actions.appendChild(call);
+      }
+      if (a.alt) {
+        const alt = el('a', {
+          className: 'agency__call agency__call--alt',
+          href: 'tel:' + a.alt.replace(/[^\d+]/g, ''),
+          textContent: a.alt
+        });
+        alt.prepend(icon('i-phone'));
+        actions.appendChild(alt);
+      }
+      if (a.report) {
+        const rep = el('a', {
+          className: 'agency__link agency__link--primary',
+          href: a.report, target: '_blank', rel: 'noopener noreferrer',
+          textContent: a.reportLabel || 'Report online'
+        });
+        rep.prepend(icon('i-external'));
+        actions.appendChild(rep);
+      }
+      if (a.site) {
+        const site = el('a', {
+          className: 'agency__link',
+          href: a.site, target: '_blank', rel: 'noopener noreferrer',
+          textContent: 'Official site'
+        });
+        site.prepend(icon('i-building'));
+        actions.appendChild(site);
+      }
+      card.appendChild(actions);
+
+      if (a.note) card.appendChild(el('p', { className: 'agency__note', textContent: a.note }));
+      list.appendChild(card);
+    }
+    block.appendChild(list);
+    host.appendChild(block);
+  }
+
+  const stamp = $('#agency-checked');
+  if (stamp) stamp.textContent = AGENCY_CHECKED;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3481,8 +4330,16 @@ const Alerting = {
    * download and it works offline. The context is created lazily because
    * browsers refuse to start one before a user gesture.
    */
+  /** Set true by the first real click or key press anywhere on the page. */
+  gestured: false,
+
   sound(severity) {
     if (!state.alertSound) return;
+    // Browsers refuse to start an AudioContext before a user gesture, and
+    // trying anyway logs a warning on every hazard sweep. A page-load alarm was
+    // never going to be audible, so skip it rather than fail noisily — the
+    // toast and the desktop notification still fire.
+    if (!this.gestured) return;
     try {
       this.audio = this.audio || new (window.AudioContext || window.webkitAudioContext)();
       const ctx = this.audio;
@@ -3518,8 +4375,23 @@ const Alerting = {
     const worst = fresh.reduce((m, a) => (a.severity > m.severity ? a : m), fresh[0]);
 
     this.sound(worst.severity);
-    toast(`${SEVERITY_LABEL[worst.severity]}: ${worst.title}`,
-          worst.severity >= 3 ? 'error' : 'warn', 9000);
+
+    // A severity-4 alert is sticky: it stays until the person dismisses it,
+    // because auto-hiding a flood warning after nine seconds is exactly the
+    // wrong behaviour. It also offers a jump straight to the detail.
+    toast(worst.detail || worst.title, worst.severity >= 3 ? 'hazard' : 'warn', {
+      title: `${SEVERITY_LABEL[worst.severity]} · ${worst.title}`,
+      id: 'hazard:' + worst.id,
+      sticky: worst.severity >= 4,
+      ms: 12000,
+      action: { label: 'See the details', onClick: () => setView('alerts') }
+    });
+
+    if (fresh.length > 1) {
+      toast(`${fresh.length - 1} more alert${fresh.length > 2 ? 's' : ''} for ${state.place?.name ?? 'this area'}.`,
+            'warn', { id: 'hazard:more', title: 'Also active',
+                      action: { label: 'Open alerts', onClick: () => setView('alerts') } });
+    }
 
     if (state.notifications && 'Notification' in window && Notification.permission === 'granted') {
       try {
@@ -5457,7 +6329,7 @@ function setView(name) {
   }
   if (name === 'analytics') { renderAnalysis(); renderDiagnostics(); }
   if (name === 'dashboard') renderHourly();
-  if (name === 'alerts') { renderAlertsView(); renderFloodChart(); }
+  if (name === 'alerts') { renderAlertsView(); renderFloodChart(); renderAgencies(); }
   if (name === 'climate') {
     renderMonsoonPanel();
     if (state.climate) renderClimateChart(state.climate.normals);
@@ -5498,20 +6370,115 @@ function renderAuthUI() {
     $('#profile-favs').textContent = String(state.favourites.length);
     $('#profile-searches').textContent = String(Object.values(Telemetry.places).reduce((a, b) => a + b, 0));
     $('#profile-backend').textContent = Auth.store.kind;
+    if (user.photo) {
+      // A Google avatar is a real image; fall back to the initial if it 404s.
+      const img = el('img', { src: user.photo, alt: '', width: 56, height: 56, referrerPolicy: 'no-referrer' });
+      img.addEventListener('error', () => {
+        $('#profile-avatar').replaceChildren(document.createTextNode((user.name || '?').charAt(0).toUpperCase()));
+      });
+      $('#profile-avatar').replaceChildren(img);
+    }
+    // Only the owner sees the database panel — but with nobody claimed yet,
+    // whoever is setting the site up needs to be able to reach it.
+    $('#btn-admin').hidden = !Admin.isOwner();
   }
 
-  $('#auth-mode-note').textContent = Auth.mode === 'firebase'
-    ? 'Signed in through Firebase Authentication. Your saved places sync to Cloud Firestore.'
-    : 'Running in local account mode: your credentials are hashed with PBKDF2-SHA256 and stored only in this browser. Google sign-in needs an identity provider — add a Firebase config in Settings to switch it on.';
+  // Three possible states, and the button must tell the truth about which.
+  const googleReady = Auth.mode === 'firebase' || Boolean(GoogleId.clientId());
 
-  // Never disabled: a dead button teaches nothing. When Firebase is absent it
-  // says so and offers the one action that fixes it.
+  $('#auth-mode-note').textContent =
+    Auth.mode === 'firebase'
+      ? 'Signed in through Firebase Authentication. Your saved places sync to Cloud Firestore, so they follow you between devices.'
+      : googleReady
+        ? 'Google sign-in is on. Google verifies who you are; the account itself lives in this browser, so saved places stay on this device. Email and password accounts are hashed with PBKDF2-SHA256 (210,000 rounds) and never leave the browser either.'
+        : 'Local account mode: your password is hashed with PBKDF2-SHA256 (210,000 rounds) and stored only in this browser. Google sign-in needs the site registered with Google once — press “Set up Google sign-in” and the wizard walks through it in about five minutes.';
+
+  // Never disabled. A greyed-out button teaches nothing and looks broken; this
+  // one always does something, and says which something it will do.
   const gbtn = $('#btn-google');
   gbtn.disabled = false;
-  gbtn.dataset.ready = String(Auth.mode === 'firebase');
-  $('#btn-google-label').textContent = Auth.mode === 'firebase'
+  gbtn.dataset.ready = String(googleReady);
+  $('#btn-google-label').textContent = googleReady
     ? 'Continue with Google'
     : 'Set up Google sign-in';
+  gbtn.title = googleReady
+    ? 'Sign in with your Google account'
+    : 'Google requires this site to be registered once — this opens the guided setup';
+}
+
+/* ── The Google sign-in setup wizard ───────────────────────────────────── */
+
+function openGoogleSetup() {
+  const dlg = $('#google-setup-dialog');
+  $('#gs-origin').textContent = GoogleId.origin();
+  $('#gs-client-id').value = safeLocal.get(LS.googleId, '');
+  $('#gs-err').textContent = '';
+  dlg.showModal();
+}
+
+/** Google client IDs have a fixed shape; catching a typo here beats a
+ *  cryptic failure from Google three clicks later. */
+const isGoogleClientId = (v) => /^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/i.test(String(v).trim());
+
+async function saveGoogleClientId() {
+  const raw = $('#gs-client-id').value.trim();
+  const err = $('#gs-err');
+  err.textContent = '';
+
+  if (!raw) { err.textContent = 'Paste the Client ID Google gave you.'; return; }
+  if (!isGoogleClientId(raw)) {
+    err.textContent = 'That does not look like a Client ID. It ends in .apps.googleusercontent.com';
+    return;
+  }
+
+  safeLocal.set(LS.googleId, raw);
+  GoogleId._script = null;                 // force a reload with the new ID
+  $('#google-setup-dialog').close();
+  renderAuthUI();
+  toast('Google sign-in is on. Press “Continue with Google” to use it.', 'success', {
+    title: 'Set up',
+    action: { label: 'Sign in now', onClick: () => { $('#auth-dialog').showModal(); startGoogleSignIn(); } }
+  });
+}
+
+function clearGoogleClientId() {
+  safeLocal.del(LS.googleId);
+  GoogleId._script = null;
+  $('#gs-client-id').value = '';
+  renderAuthUI();
+  toast('Google sign-in turned off. Email accounts still work.', 'info', { title: 'Removed' });
+}
+
+/** The single entry point behind the Google button, whichever mode is live. */
+async function startGoogleSignIn() {
+  const msg = $('#auth-msg');
+  const btn = $('#btn-google');
+  msg.textContent = '';
+
+  if (Auth.mode !== 'firebase' && !GoogleId.clientId()) { openGoogleSetup(); return; }
+
+  btn.disabled = true;
+  const restore = $('#btn-google-label').textContent;
+  $('#btn-google-label').textContent = 'Waiting for Google…';
+
+  try {
+    await Auth.signInWithGoogle();
+    msg.dataset.type = 'success';
+    msg.textContent = 'Signed in with Google.';
+    setTimeout(() => $('#auth-dialog').close(), 700);
+    toast('Signed in as ' + (Auth.user?.email || 'your Google account'), 'success');
+  } catch (err) {
+    if (err.message === 'NEEDS_SETUP') { openGoogleSetup(); return; }
+    if (err.message === 'CANCELLED') { msg.textContent = ''; return; }
+    msg.dataset.type = 'error';
+    msg.textContent = friendlyAuthError(err);
+    Telemetry.record('auth', { lvl: 'error', msg: 'Google sign-in: ' + err.message });
+  } finally {
+    btn.disabled = false;
+    $('#btn-google-label').textContent = restore;
+    const host = $('#google-host');
+    if (host) host.hidden = true;
+  }
 }
 
 function setAuthMode(mode) {
@@ -5594,12 +6561,143 @@ function friendlyAuthError(err) {
   return map[code] || err?.message || 'Something went wrong. Please try again.';
 }
 
+/* ── The admin database panel ───────────────────────────────────────────── */
+
+async function openAdmin() {
+  const dlg = $('#admin-dialog');
+  dlg.showModal();
+  await renderAdmin();
+}
+
+async function renderAdmin() {
+  const [users, profiles, storage] = await Promise.all([
+    Admin.users(), Admin.profiles(), Admin.storage()
+  ]);
+
+  const cloud = Auth.mode === 'firebase';
+  $('#admin-where').textContent = cloud
+    ? 'Cloud Firestore, collection “users”, in your own Firebase project. That is a real central database — every visitor who signs in writes a document you can read in the Firebase console. The table below shows the accounts cached on this device.'
+    : 'IndexedDB database “cuacamy”, object store “users”, on this device. A static site has no server, so accounts live in each visitor’s own browser — read the note below for how to move to one central database.';
+
+  const used = storage.usage;
+  const quota = storage.quota;
+  const stats = [
+    ['Backend', Auth.store.kind],
+    ['Accounts here', String(users.length)],
+    ['Google accounts', String(users.filter((u) => u.provider === 'google').length)],
+    ['Password accounts', String(users.filter((u) => u.provider === 'password').length)],
+    ['Storage used', used === null ? 'Not reported' : fmt.bytes(used)],
+    ['Storage available', quota === null ? 'Not reported' : fmt.bytes(quota)],
+    ['Eviction protected', storage.persisted === null ? 'Unknown' : storage.persisted ? 'Yes' : 'No — press “Protect from eviction”'],
+    ['Owner account', Admin.ownerEmail() || 'Not claimed yet — the first account created becomes the owner']
+  ];
+
+  const grid = $('#admin-stats');
+  grid.replaceChildren();
+  for (const [label, value] of stats) {
+    grid.appendChild(el('div', { className: 'admin-stat' }, [
+      el('span', { className: 'admin-stat__label', textContent: label }),
+      el('strong', { className: 'admin-stat__value', textContent: value })
+    ]));
+  }
+
+  const host = $('#admin-users');
+  host.replaceChildren();
+
+  if (!users.length) {
+    host.appendChild(el('p', {
+      className: 'empty',
+      textContent: 'No accounts on this device yet. Create one from the sign-in dialog and it will appear here, with the first account becoming the owner.'
+    }));
+    return;
+  }
+
+  const table = el('table', { className: 'table table--admin' });
+  const head = el('tr');
+  for (const h of ['Email', 'Name', 'Sign-in method', 'Created', 'Last seen', 'Sign-ins', 'Saved places', '']) {
+    head.appendChild(el('th', { textContent: h, attrs: { scope: 'col' } }));
+  }
+  table.appendChild(el('thead', {}, [head]));
+
+  const body = el('tbody');
+  for (const u of users) {
+    const places = (profiles.get(u.uid)?.favourites || []).length;
+    const isOwner = Admin.ownerEmail() === u.email.toLowerCase();
+
+    const emailCell = el('th', { attrs: { scope: 'row' } }, [document.createTextNode(u.email)]);
+    if (isOwner) emailCell.appendChild(el('span', { className: 'tag tag--owner', textContent: 'owner' }));
+
+    const method = u.provider === 'google'
+      ? (u.verified ? 'Google (verified)' : 'Google')
+      : u.hashed ? `Password · PBKDF2 ×${(u.iterations || PBKDF2_ITERATIONS).toLocaleString()}` : 'Unknown';
+
+    const del = el('button', {
+      type: 'button', className: 'btn btn--danger btn--sm',
+      textContent: 'Delete',
+      onclick: () => confirmDeleteUser(u.email)
+    });
+
+    body.appendChild(el('tr', {}, [
+      emailCell,
+      el('td', { textContent: u.name || '—' }),
+      el('td', { textContent: method }),
+      el('td', { textContent: u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—' }),
+      el('td', { textContent: u.lastSignIn ? fmt.relative(u.lastSignIn) : '—' }),
+      el('td', { className: 'num', textContent: String(u.signInCount || 0) }),
+      el('td', { className: 'num', textContent: String(places) }),
+      el('td', {}, [del])
+    ]));
+  }
+  table.appendChild(body);
+  host.appendChild(table);
+}
+
+function confirmDeleteUser(email) {
+  // A destructive action gets a sticky toast with an explicit confirm, rather
+  // than a native confirm() that some browsers suppress inside a dialog.
+  toast(`Delete the account ${email} and everything saved under it? This cannot be undone.`, 'warn', {
+    title: 'Confirm deletion',
+    sticky: true,
+    id: 'admin:del:' + email,
+    action: {
+      label: 'Delete permanently',
+      onClick: async () => {
+        await Admin.deleteUser(email);
+        await renderAdmin();
+        renderAuthUI();
+        toast(`Deleted ${email}.`, 'success');
+      }
+    }
+  });
+}
+
+function confirmWipe() {
+  toast('Delete every account, profile and saved place stored by CuacaMY on this device? This cannot be undone.', 'error', {
+    title: 'Confirm full wipe',
+    sticky: true,
+    id: 'admin:wipe',
+    action: {
+      label: 'Delete everything',
+      onClick: async () => {
+        await Admin.wipe();
+        state.favourites = [];
+        renderSavedList();
+        await renderAdmin();
+        renderAuthUI();
+        toast('The database is empty.', 'success');
+      }
+    }
+  });
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * 21 · SETTINGS DIALOG
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 function openSettings() {
   $('#set-apikey').value = safeLocal.get(LS.apiKey, '');
+  $('#set-google-id').value = safeLocal.get(LS.googleId, '');
+  $('#set-version').textContent = 'v' + VERSION;
   const fb = safeLocal.json(LS.firebase, null);
   $('#set-firebase').value = fb ? JSON.stringify(fb, null, 2) : '';
   $('#set-firebase-err').textContent = '';
@@ -5616,6 +6714,18 @@ function openSettings() {
 
 async function saveSettingsFromDialog() {
   const key = $('#set-apikey').value.trim();
+  const gid = $('#set-google-id').value.trim();
+
+  // Validate before storing: a typo saved silently becomes a dead Google
+  // button later, which is exactly the failure this release set out to remove.
+  if (gid && !isGoogleClientId(gid)) {
+    toast('That Google Client ID does not look right — it should end in .apps.googleusercontent.com',
+          'error', { title: 'Not saved', ms: 8000 });
+    $('#set-google-id').focus();
+    return;
+  }
+  if (gid) safeLocal.set(LS.googleId, gid); else safeLocal.del(LS.googleId);
+  GoogleId._script = null;
   const hadKey = hasKey();
   const providerChanged = state.provider !== $('#set-provider').value;
 
@@ -5798,14 +6908,68 @@ function wireEvents() {
     renderPlacesList();
   }, 160));
 
+  $('#saved-empty-cta').addEventListener('click', () => {
+    setView('dashboard');
+    const input = $('#search-input');
+    input.focus();
+    input.select();
+    toast('Type a town, then press the star beside its name to save it.', 'info', { title: 'Saving a place' });
+  });
+
+  $('#foot-agencies').addEventListener('click', (e) => {
+    e.preventDefault();
+    setView('alerts');
+    $('#view-alerts').scrollIntoView({ behavior: state.reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  });
+
   $('#btn-compare').addEventListener('click', renderCapitalComparison);
   $('#compare-close').addEventListener('click', () => { $('#compare-card').hidden = true; });
+
+  // One-time arming, so an alarm never tries to play before the browser allows
+  // it. `once` means this costs nothing after the first interaction.
+  for (const evt of ['pointerdown', 'keydown']) {
+    window.addEventListener(evt, () => { Alerting.gestured = true; }, { once: true, passive: true });
+  }
+
+  /* ── Notification centre ────────────────────────────────────────────── */
+  const notifPanel = $('#notif-panel');
+  const notifBtn = $('#btn-notif');
+
+  const closeNotifPanel = () => {
+    notifPanel.hidden = true;
+    notifBtn.setAttribute('aria-expanded', 'false');
+  };
+
+  notifBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = notifPanel.hidden;
+    notifPanel.hidden = !open;
+    notifBtn.setAttribute('aria-expanded', String(open));
+    if (open) { Notifications.markRead(); Notifications.paint(); }
+  });
+
+  // Click-away and Escape both close it — a panel you cannot dismiss is a bug.
+  document.addEventListener('click', (e) => {
+    if (!notifPanel.hidden && !notifPanel.contains(e.target) && !notifBtn.contains(e.target)) closeNotifPanel();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !notifPanel.hidden) { closeNotifPanel(); notifBtn.focus(); }
+  });
+
+  $('#btn-notif-clear').addEventListener('click', () => {
+    Notifications.clear();
+    toast('Notification history cleared.', 'success', { silent: true });
+  });
+
+  $('#btn-notif-enable').addEventListener('click', async () => {
+    const granted = await Alerting.requestPermission();
+    syncNotifyButtons(granted);
+  });
 
   /* ── Alerts, climate and the assistant ──────────────────────────────── */
   $('#btn-notify').addEventListener('click', async () => {
     const granted = await Alerting.requestPermission();
-    $('#btn-notify').textContent = granted ? 'Notifications on' : 'Enable notifications';
-    $('#btn-notify').disabled = granted;
+    syncNotifyButtons(granted);
   });
 
   $('#btn-test-alarm').addEventListener('click', () => {
@@ -5845,28 +7009,64 @@ function wireEvents() {
     $('#auth-strength-text').textContent = label;
   });
 
-  $('#btn-google').addEventListener('click', async () => {
+  $('#btn-google').addEventListener('click', startGoogleSignIn);
+
+  $('#gs-save').addEventListener('click', saveGoogleClientId);
+  $('#gs-clear').addEventListener('click', clearGoogleClientId);
+  $('#gs-client-id').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveGoogleClientId(); }
+  });
+  $('#gs-copy').addEventListener('click', async () => {
+    const text = GoogleId.origin();
     try {
-      await Auth.signInWithGoogle();
-      $('#auth-dialog').close();
-      toast('Signed in with Google.', 'success');
-    } catch (err) {
-      if (err.message === 'NEEDS_FIREBASE') {
-        $('#auth-dialog').close();
-        openSettings();
-        $('#set-firebase').focus();
-        toast('Paste a Firebase config here to turn on Google sign-in.', 'info', 7000);
-        return;
-      }
-      $('#auth-msg').dataset.type = 'error';
-      $('#auth-msg').textContent = friendlyAuthError(err);
+      await navigator.clipboard.writeText(text);
+      toast('Origin copied. Paste it into Google Cloud.', 'success');
+    } catch {
+      // Clipboard access is refused in plenty of contexts; select it instead
+      // so the user can copy by hand rather than being told "failed".
+      const node = $('#gs-origin');
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const sel = window.getSelection();
+      sel.removeAllRanges(); sel.addRange(range);
+      toast('Selected — press Ctrl/Cmd + C to copy.', 'info');
     }
+  });
+
+  /* ── Admin database panel ───────────────────────────────────────────── */
+  $('#btn-admin').addEventListener('click', openAdmin);
+  $('#admin-refresh').addEventListener('click', renderAdmin);
+  $('#admin-persist').addEventListener('click', async () => {
+    await Admin.requestPersistence();
+    await renderAdmin();
+  });
+  $('#admin-wipe').addEventListener('click', confirmWipe);
+
+  $('#admin-export-json').addEventListener('click', async () => {
+    downloadJSON('cuacamy-user-database.json', await Admin.export());
+    toast('Database exported as JSON.', 'success');
+  });
+
+  $('#admin-export-csv').addEventListener('click', async () => {
+    const [users, profiles] = await Promise.all([Admin.users(), Admin.profiles()]);
+    downloadCSV(
+      'cuacamy-users.csv',
+      ['Email', 'Name', 'Method', 'Verified', 'Created', 'Last sign-in', 'Sign-ins', 'Saved places'],
+      users.map((u) => [
+        u.email, u.name, u.provider, u.verified ? 'yes' : 'no',
+        u.createdAt ? new Date(u.createdAt).toISOString() : '',
+        u.lastSignIn ? new Date(u.lastSignIn).toISOString() : '',
+        u.signInCount, (profiles.get(u.uid)?.favourites || []).length
+      ])
+    );
+    toast('Accounts exported as CSV.', 'success');
   });
 
   $('#btn-signout').addEventListener('click', async () => {
     await Auth.signOut();
+    GoogleId.reset();
     $('#auth-dialog').close();
-    toast('Signed out.');
+    toast('Signed out.', 'success');
   });
 
   $('#btn-export-account').addEventListener('click', () => {
@@ -5892,6 +7092,43 @@ function wireEvents() {
     safeLocal.set('cuacamy.geo.dismissed', '1');
   });
   $('#btn-save-settings').addEventListener('click', saveSettingsFromDialog);
+
+  $('#set-google-wizard').addEventListener('click', () => {
+    $('#settings-dialog').close();
+    openGoogleSetup();
+  });
+
+  $('#btn-check-update').addEventListener('click', async () => {
+    if (!('serviceWorker' in navigator)) { toast('This browser has no offline support to update.', 'warn'); return; }
+    const btn = $('#btn-check-update');
+    btn.disabled = true;
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) { toast('No cached copy yet — you are already on the live build.', 'success'); return; }
+      await reg.update();
+      // `update()` resolves whether or not anything new was found, so the
+      // answer is whichever worker is now sitting in the wings.
+      if (reg.installing || reg.waiting) {
+        toast('A newer version is downloading. You will be offered a reload when it is ready.', 'info',
+              { title: 'Update found', ms: 7000 });
+      } else {
+        toast('You are on the newest version (v' + VERSION + ').', 'success', { title: 'Up to date' });
+      }
+    } catch (err) {
+      toast('Could not check for updates: ' + err.message, 'warn');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('#btn-hard-refresh').addEventListener('click', () => {
+    toast('This clears every cached file and reloads. Your account and saved places are kept.', 'warn', {
+      title: 'Force a fresh copy',
+      sticky: true,
+      id: 'settings:hardrefresh',
+      action: { label: 'Clear and reload', onClick: hardRefresh }
+    });
+  });
   $('#btn-reset').addEventListener('click', resetEverything);
 
   /* ── Global shortcuts ───────────────────────────────────────────────── */
@@ -5950,12 +7187,102 @@ function wireEvents() {
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
-  if (location.protocol !== 'https:' && location.hostname !== 'localhost') return;
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js')
-      .then((reg) => Telemetry.record('sw', { lvl: 'info', msg: 'Service worker active (scope ' + reg.scope + ')' }))
-      .catch((err) => Telemetry.record('sw', { lvl: 'warn', msg: 'Service worker registration failed: ' + err.message }));
+  // isSecureContext is the actual rule the browser applies. Testing for
+  // 'https:' or the literal string 'localhost' misses 127.0.0.1, ::1 and any
+  // other trustworthy origin, and silently disabled offline support there.
+  if (!window.isSecureContext) return;
+
+  // A worker that has taken over mid-session is running against HTML and CSS
+  // that may predate it. Reloading once, and only once, resolves that without
+  // an infinite loop if something goes wrong.
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    if (sessionStorage.getItem('cuacamy.sw.reloaded') === '1') return;
+    try { sessionStorage.setItem('cuacamy.sw.reloaded', '1'); } catch { /* private mode */ }
+    location.reload();
   });
+
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    const data = event.data || {};
+    if (data.type === 'sw-activated') {
+      Telemetry.record('sw', { lvl: 'info', msg: `Service worker ${data.version} (build ${data.build}) took over` });
+    }
+  });
+
+  // boot() is async and awaits an optional dynamic import before it gets here,
+  // so the window `load` event has usually already fired by this point. Adding
+  // a listener for an event that has been and gone means it never runs — which
+  // is why registration was silently intermittent. Check readyState first.
+  const start = () => {
+    navigator.serviceWorker.register('./sw.js')
+      .then((reg) => {
+        Telemetry.record('sw', { lvl: 'info', msg: 'Service worker active (scope ' + reg.scope + ')' });
+
+        // A worker already waiting means a newer build is sitting on disk,
+        // blocked only by this tab. Offer the reload rather than waiting for
+        // every tab to close.
+        if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
+
+        reg.addEventListener('updatefound', () => {
+          const sw = reg.installing;
+          if (!sw) return;
+          sw.addEventListener('statechange', () => {
+            if (sw.state === 'installed' && navigator.serviceWorker.controller) offerUpdate(sw);
+          });
+        });
+
+        // Check again when the tab is brought back to the foreground: a phone
+        // left open for a week should not miss a deploy.
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update().catch(() => {});
+        });
+        setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+      })
+      .catch((err) => Telemetry.record('sw', { lvl: 'warn', msg: 'Service worker registration failed: ' + err.message }));
+  };
+
+  if (document.readyState === 'complete') start();
+  else window.addEventListener('load', start, { once: true });
+}
+
+/** A sticky toast with a Reload action — never auto-dismissed. */
+function offerUpdate(worker) {
+  toast('A newer version of CuacaMY is ready.', 'info', {
+    sticky: true,
+    title: 'Update available',
+    action: {
+      label: 'Reload now',
+      onClick: () => worker.postMessage({ type: 'skip-waiting' })
+    }
+  });
+}
+
+/**
+ * The escape hatch. If a visitor is somehow pinned to an old build — a broken
+ * worker, a corrupt cache, a browser that will not let go — this unregisters
+ * every worker, deletes every cache, and reloads with a cache-busting query.
+ * Nothing about their account or saved places is touched.
+ */
+async function hardRefresh() {
+  setStatus('Clearing the cache…');
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+  } catch (err) {
+    Telemetry.record('sw', { lvl: 'warn', msg: 'Cache purge partially failed: ' + err.message });
+  }
+  try { sessionStorage.removeItem('cuacamy.sw.reloaded'); } catch { /* ignore */ }
+  const url = new URL(location.href);
+  url.searchParams.set('fresh', String(Date.now()));
+  location.replace(url.toString());
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -6026,11 +7353,9 @@ async function boot() {
   $('#banner-setup').hidden = true;
   setAuthMode('signin');
 
-  if ('Notification' in window && Notification.permission === 'granted') {
-    state.notifications = true;
-    const btn = $('#btn-notify');
-    if (btn) { btn.textContent = 'Notifications on'; btn.disabled = true; }
-  }
+  Notifications.restore();
+  if ('Notification' in window && Notification.permission === 'granted') state.notifications = true;
+  syncNotifyButtons();
 
   await Auth.init();
   renderAuthUI();
@@ -6043,6 +7368,52 @@ async function boot() {
 
   Telemetry.record('boot', { lvl: 'perf', msg: `Application ready in ${fmt.ms(performance.now() - t0)}` });
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 34 · PUBLIC DIAGNOSTIC SURFACE
+ * ---------------------------------------------------------------------------
+ * app.js is an ES module, so everything above is private by default — which is
+ * right for application code and wrong for two specific jobs: helping someone
+ * debug a live problem from their browser console, and letting the automated
+ * test suite drive the UI without reaching into internals it should not know
+ * about.
+ *
+ * So a deliberate, minimal surface is published under one namespace. Every
+ * entry is read-only or idempotent; nothing here can put the app into a state
+ * the UI itself could not reach.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+window.CuacaMY = Object.freeze({
+  version: VERSION,
+
+  /** Show a notification. Same signature the app uses internally. */
+  toast,
+
+  /** Unregister the worker, drop every cache and reload. The escape hatch for
+   *  anyone stuck on a stale build. */
+  hardRefresh,
+
+  /** The notification centre: read the log, mark read, clear it. */
+  notifications: Notifications,
+
+  /** Account storage: who is on this device, how much space, export. */
+  admin: Admin,
+
+  /** Performance and API timings collected this session. */
+  diagnostics: () => Telemetry.snapshot(),
+
+  /** Which data provider answered, and whether a key is configured. */
+  provider: () => ({ active: provider(), configured: state.provider, hasKey: hasKey() }),
+
+  /** The place currently on screen. */
+  place: () => (state.place ? { ...state.place } : null),
+
+  /** Toast queue depth — answers "why has my notification not appeared yet". */
+  toasts: () => ({
+    visible: [...toastLive.values()].map((n) => n._toast?.message ?? ''),
+    queued: toastQueue.map((t) => t.message)
+  })
+});
 
 boot().catch((err) => {
   console.error('[CuacaMY] Fatal startup error', err);

@@ -42,6 +42,17 @@ jobs:
           rsync -a --exclude='.git' --exclude='.github' --exclude='docs' ./ "$site/"
           touch "$site/.nojekyll"
 
+          # Stamp the build into the service worker. This is what makes an
+          # update reach people: a browser only re-installs a worker whose
+          # source bytes differ, so a deploy that changed app.js but left
+          # sw.js identical would leave every returning visitor on the old
+          # build with nothing in the UI to tell them. The commit SHA
+          # guarantees the bytes differ on every single deploy.
+          sed -i "s/^const BUILD_ID = 'dev';/const BUILD_ID = '${GITHUB_SHA:0:12}';/" "$site/sw.js"
+          grep -q "const BUILD_ID = '${GITHUB_SHA:0:12}';" "$site/sw.js" \
+            || { echo "::error::Failed to stamp BUILD_ID into sw.js"; exit 1; }
+          echo "Stamped sw.js with build ${GITHUB_SHA:0:12}"
+
           cd "$site"
           git init -q -b gh-pages
           git config user.name  "github-actions[bot]"
@@ -88,5 +99,25 @@ jobs:
             [ "$a" = "200" ] || fail=1
           done
           [ $fail -eq 0 ] || { echo "::error::One or more assets failed to load."; exit 1; }
+
+          # The stale-build trap this project hit once already: verify the
+          # deployed worker really carries this commit's stamp, so a visitor's
+          # browser is guaranteed to see new bytes and re-install.
+          curl -sSL --max-time 20 "${url}sw.js" -o sw.js
+          if grep -q "const BUILD_ID = 'dev';" sw.js; then
+            echo "::error::The live sw.js is unstamped — returning visitors would be pinned to the cached build."
+            exit 1
+          fi
+          echo "  live sw.js build: $(grep -o \"BUILD_ID = '[^']*'\" sw.js)"
+
+          # The version in app.js and the one in sw.js must not drift apart.
+          curl -sSL --max-time 20 "${url}app.js" -o app.js
+          app_v=$(grep -o \"^const VERSION = '[^']*'\" app.js | head -1 | sed \"s/.*'\\(.*\\)'/\\1/\")
+          sw_v=$(grep -o \"^const VERSION  = '[^']*'\" sw.js | head -1 | sed \"s/.*'v\\(.*\\)'/\\1/\")
+          echo "  app.js v${app_v} · sw.js v${sw_v}"
+          if [ "$app_v" != "$sw_v" ]; then
+            echo "::error::Version drift: app.js says ${app_v}, sw.js says ${sw_v}."
+            exit 1
+          fi
 
           echo "::notice::Live and serving correctly at ${url}"

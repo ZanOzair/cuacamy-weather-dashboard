@@ -107,7 +107,23 @@
    once, globally, rather than remembered at every call site. */
 [hidden] { display: none !important; }
 
-html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; overflow-x: hidden; }
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+  /* Stops the whole page bouncing past its ends on iOS while leaving inner
+     scrollers (tables, the notification list) free to scroll normally. */
+  overscroll-behavior-y: none;
+}
+
+/* Every tappable thing gets a real target. 44 CSS px is Apple's minimum and
+   Android's is 48dp ≈ 44px, so one rule satisfies both. Declared once here
+   rather than remembered per component. */
+button, [role="button"], a.btn, .icon-btn, summary, .tab, label.check {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;   /* removes the 300ms double-tap-zoom delay */
+}
 
 body {
   margin: 0;
@@ -387,25 +403,98 @@ code { font-family: var(--font-mono); font-size: .88em; background: var(--surfac
 .banner__cta:hover { filter: brightness(1.12); }
 
 .toasts {
-  position: fixed; z-index: 200; bottom: var(--sp-5); right: var(--sp-5);
+  position: fixed; z-index: 200;
+  bottom: calc(var(--sp-5) + env(safe-area-inset-bottom, 0px));
+  right: calc(var(--sp-5) + env(safe-area-inset-right, 0px));
   display: flex; flex-direction: column; gap: var(--sp-2);
-  max-width: min(92vw, 380px); pointer-events: none;
+  max-width: min(92vw, 400px); pointer-events: none;
 }
 .toast {
-  display: flex; align-items: flex-start; gap: var(--sp-3);
+  position: relative; overflow: hidden;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start; gap: var(--sp-3);
   background: var(--bg-raise); border: 1px solid var(--border-str);
   border-left: 3px solid var(--c-brand-400);
   border-radius: var(--r-md); box-shadow: var(--shadow-lg);
-  padding: var(--sp-3) var(--sp-4); font-size: 14px;
+  padding: var(--sp-3) var(--sp-3) var(--sp-3) var(--sp-4); font-size: 14px;
   animation: toast-in var(--dur) var(--ease);
   pointer-events: auto;
 }
+.toast__icon { width: 18px; height: 18px; flex: none; margin-top: 1px; fill: var(--c-brand-400); }
+.toast__body { min-width: 0; }
+.toast__title { display: block; font-size: 13px; letter-spacing: .01em; margin-bottom: 2px; }
+.toast__msg { margin: 0; color: var(--text-mut); overflow-wrap: anywhere; }
+.toast__action {
+  margin-top: var(--sp-2); background: var(--c-brand-500); color: #fff; border: 0;
+  border-radius: var(--r-sm); padding: 7px 12px; font: inherit; font-size: 13px;
+  font-weight: 600; cursor: pointer; min-height: 34px;
+}
+.toast__action:hover  { background: var(--c-brand-400); }
+.toast__action:active { transform: translateY(1px); }
+.toast__close {
+  flex: none; background: none; border: 0; color: var(--text-mut); cursor: pointer;
+  padding: 4px; border-radius: var(--r-sm); line-height: 0;
+  min-width: 28px; min-height: 28px; display: grid; place-items: center;
+}
+.toast__close svg { width: 16px; height: 16px; fill: currentColor; }
+.toast__close:hover { color: var(--text); background: var(--bg-sink); }
+.toast__timer {
+  position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+  background: var(--c-brand-400); transform-origin: left center;
+  animation-name: toast-timer; animation-timing-function: linear; animation-fill-mode: forwards;
+}
+@keyframes toast-timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
 .toast[data-type="error"]   { border-left-color: var(--c-bad); }
+.toast[data-type="error"]   .toast__icon, .toast[data-type="error"] .toast__timer { fill: var(--c-bad); background: var(--c-bad); }
 .toast[data-type="success"] { border-left-color: var(--c-good); }
+.toast[data-type="success"] .toast__icon { fill: var(--c-good); }
+.toast[data-type="success"] .toast__timer { background: var(--c-good); }
 .toast[data-type="warn"]    { border-left-color: var(--c-warn); }
+.toast[data-type="warn"]    .toast__icon { fill: var(--c-warn); }
+.toast[data-type="warn"]    .toast__timer { background: var(--c-warn); }
+.toast[data-type="hazard"]  { border-left-color: var(--c-bad); border-left-width: 4px; }
+.toast[data-type="hazard"]  .toast__icon { fill: var(--c-bad); }
 .toast.is-out { animation: toast-out 180ms var(--ease) forwards; }
 @keyframes toast-in  { from { opacity: 0; transform: translateY(12px) scale(.97); } }
 @keyframes toast-out { to   { opacity: 0; transform: translateX(20px); } }
+
+/* ── Notification centre ───────────────────────────────────────────────── */
+.notif-wrap { position: relative; }
+.notif-badge {
+  position: absolute; top: -3px; right: -3px; min-width: 17px; height: 17px;
+  padding: 0 4px; border-radius: 9px; background: var(--c-bad); color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 17px; text-align: center;
+  border: 2px solid var(--bg-base); box-sizing: content-box;
+}
+.notif-panel {
+  position: absolute; top: calc(100% + 10px); right: 0; z-index: 120;
+  width: min(92vw, 380px); max-height: min(70vh, 520px);
+  display: flex; flex-direction: column;
+  background: var(--bg-raise); border: 1px solid var(--border-str);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-lg);
+  animation: toast-in 160ms var(--ease);
+}
+.notif-panel__head, .notif-panel__foot {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border);
+}
+.notif-panel__foot { border-bottom: 0; border-top: 1px solid var(--border); }
+.notif-list { list-style: none; margin: 0; padding: var(--sp-2); overflow-y: auto; flex: 1; }
+.notif-list .empty { padding: var(--sp-5) var(--sp-4); color: var(--text-mut); font-size: 14px; margin: 0; }
+.notif {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-3);
+  padding: var(--sp-3); border-radius: var(--r-md);
+}
+.notif + .notif { border-top: 1px solid var(--border); border-radius: 0; }
+.notif:hover { background: var(--bg-sink); }
+.notif__icon { width: 17px; height: 17px; margin-top: 2px; fill: var(--c-brand-400); }
+.notif[data-type="error"] .notif__icon, .notif[data-type="hazard"] .notif__icon { fill: var(--c-bad); }
+.notif[data-type="warn"] .notif__icon    { fill: var(--c-warn); }
+.notif[data-type="success"] .notif__icon { fill: var(--c-good); }
+.notif__body strong { display: block; font-size: 13px; margin-bottom: 2px; }
+.notif__body p { margin: 0; font-size: 13px; color: var(--text-mut); overflow-wrap: anywhere; }
+.notif__time { display: block; margin-top: 4px; font-size: 11px; color: var(--text-dim); }
 
 /* ── 06. LAYOUT & CARDS ────────────────────────────────────────────────── */
 .main { max-width: var(--maxw); margin: 0 auto; padding: var(--sp-5); }
@@ -1246,16 +1335,109 @@ select.input { cursor: pointer; appearance: none;
 /* ── 11. FOOTER, MOTION & RESPONSIVE ───────────────────────────────────── */
 .footer {
   max-width: var(--maxw); margin: var(--sp-7) auto 0;
-  padding: var(--sp-5) var(--sp-5) var(--sp-7);
+  padding: var(--sp-6) var(--sp-5) calc(var(--sp-7) + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border);
   color: var(--text-dim); font-size: 13px;
-  display: flex; align-items: center; justify-content: space-between;
-  gap: var(--sp-3); flex-wrap: wrap;
 }
-.footer__meta { display: flex; align-items: center; gap: var(--sp-2);
+.footer__cols {
+  display: grid; gap: var(--sp-5) var(--sp-6);
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  margin-bottom: var(--sp-6);
+}
+.footer__col { min-width: 0; }
+.footer__h {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--text-mut); margin: 0 0 var(--sp-3); font-weight: 700;
+}
+.footer__links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.footer__links a { color: var(--text-mut); text-decoration: none; display: inline-block; padding: 3px 0; }
+.footer__links a:hover, .footer__links a:focus-visible { color: var(--c-brand-400); text-decoration: underline; }
+.footer__note { margin: var(--sp-3) 0 0; font-size: 12px; line-height: 1.6; }
+
+.footer__col--emergency { min-width: 0; }
+.footer__999 {
+  display: flex; align-items: center; gap: var(--sp-3);
+  background: color-mix(in srgb, var(--c-bad) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-bad) 45%, transparent);
+  border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4);
+  text-decoration: none; color: var(--text); min-height: 56px;
+}
+.footer__999:hover { background: color-mix(in srgb, var(--c-bad) 22%, transparent); }
+.footer__999 svg { width: 22px; height: 22px; fill: var(--c-bad); flex: none; }
+.footer__999 strong { display: block; font-size: 24px; line-height: 1.1; letter-spacing: .02em; }
+.footer__999 small { display: block; font-size: 11px; color: var(--text-mut); margin-top: 2px; }
+
+.footer__bar {
+  border-top: 1px solid var(--border); padding-top: var(--sp-4);
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: var(--sp-4); flex-wrap: wrap;
+}
+.footer__bar p { margin: 0; max-width: 78ch; line-height: 1.7; }
+.footer__meta { display: flex; align-items: center; gap: var(--sp-2); flex: none;
                 font-family: var(--font-mono); font-size: 12px; }
 
+/* ── Agency directory ──────────────────────────────────────────────────── */
+.card--agencies { grid-column: span 12; }
+.card--agencies .card__title svg { width: 18px; height: 18px; fill: var(--c-brand-400); vertical-align: -3px; margin-right: 6px; }
+
+.agency-groups { display: flex; flex-direction: column; gap: var(--sp-5); margin-top: var(--sp-4); }
+.agency-group__title {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--text-mut); margin: 0 0 var(--sp-3); font-weight: 700;
+}
+.agency-group--urgent .agency-group__title { color: var(--c-bad); }
+.agency-group--urgent .agency { border-color: color-mix(in srgb, var(--c-bad) 35%, var(--border)); }
+
+.agency-list {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; gap: var(--sp-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+}
+.agency {
+  background: var(--bg-sink); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: var(--sp-4); min-width: 0;
+  display: flex; flex-direction: column; gap: var(--sp-2);
+}
+.agency__name { font-size: 14px; margin: 0; line-height: 1.4; }
+.agency__role { margin: 0; font-size: 13px; line-height: 1.65; color: var(--text-mut); }
+.agency__why {
+  margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--text-dim);
+  border-left: 2px solid var(--c-brand-500); padding-left: var(--sp-3);
+}
+.agency__note { margin: 0; font-size: 12px; color: var(--text-dim); }
+.agency__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: auto; padding-top: var(--sp-2); }
+
+.agency__call, .agency__link {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: var(--r-sm); padding: 8px 12px; min-height: 40px;
+  font-size: 13px; font-weight: 600; text-decoration: none;
+  border: 1px solid var(--border-str); color: var(--text);
+}
+.agency__call { background: var(--c-bad); border-color: var(--c-bad); color: #fff; }
+.agency__call:hover { filter: brightness(1.1); }
+.agency__call--alt { background: transparent; color: var(--text); border-color: var(--border-str); }
+.agency__call svg, .agency__link svg { width: 14px; height: 14px; fill: currentColor; flex: none; }
+.agency__link:hover { border-color: var(--c-brand-400); color: var(--c-brand-400); }
+.agency__link--primary { border-color: var(--c-brand-500); color: var(--c-brand-400); }
+.agency-foot { margin-top: var(--sp-4); line-height: 1.7; }
+.agency-foot a { color: var(--c-bad); }
+
+/* ── Richer empty states ───────────────────────────────────────────────── */
+.card__lede { margin: 0 0 var(--sp-4); font-size: 13.5px; line-height: 1.7; color: var(--text-mut); }
+.empty--rich {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: var(--sp-2); padding: var(--sp-5) var(--sp-4);
+  border: 1px dashed var(--border-str); border-radius: var(--r-md);
+  background: var(--bg-sink);
+}
+.empty__icon { width: 28px; height: 28px; fill: var(--text-dim); margin-bottom: var(--sp-1, 4px); }
+.empty__title { margin: 0; font-weight: 600; color: var(--text); font-size: 14px; }
+.empty__body { margin: 0; font-size: 13px; line-height: 1.7; color: var(--text-mut); max-width: 42ch; }
+.empty__inline { width: 14px; height: 14px; fill: var(--c-warn); vertical-align: -2px; }
+#saved-empty-cta { margin-top: var(--sp-3); }
+
 @media (max-width: 860px) {
+  :root { --gutter: var(--sp-3); }
   .topbar__inner {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas: "brand actions" "search search";
@@ -1286,6 +1468,109 @@ select.input { cursor: pointer; appearance: none;
   .forecast { grid-template-columns: repeat(2, 1fr); }
   .aqi__pollutants { grid-template-columns: 1fr; }
   .dialog { padding: var(--sp-5); border-radius: var(--r-lg); }
+  .footer__cols { grid-template-columns: 1fr; gap: var(--sp-5); }
+  .agency-list { grid-template-columns: 1fr; }
+  .admin-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ── 12. PHONES ─────────────────────────────────────────────────────────────
+ * Everything below is about physical devices rather than abstract widths:
+ * notches and home indicators, the browser chrome that grows and shrinks as
+ * you scroll, thumbs instead of mouse pointers, and the two iOS behaviours
+ * that break more layouts than anything else — the zoom on focusing a small
+ * input, and 100vh being taller than the visible viewport.
+ * ------------------------------------------------------------------------- */
+
+/* 1 · Notches, curved corners and the home indicator.
+ *     viewport-fit=cover lets the page use the full screen, which then makes
+ *     it OUR job to keep content out of the cut-outs. */
+/*     --gutter carries whatever inline padding the current breakpoint already
+ *     wanted, so adding the inset never shrinks the desktop layout. */
+.topbar__inner, .tabs__inner, .main {
+  padding-left:  max(var(--gutter, var(--sp-5)), env(safe-area-inset-left));
+  padding-right: max(var(--gutter, var(--sp-5)), env(safe-area-inset-right));
+}
+.main { padding-bottom: max(var(--sp-5), env(safe-area-inset-bottom)); }
+
+/* 2 · The address bar that hides and reappears. 100dvh tracks the actually
+ *     visible area; the 100vh line above it is the fallback for browsers
+ *     that do not know dvh. */
+@supports (height: 100dvh) {
+  body { min-height: 100dvh; }
+  .dialog { max-height: min(88dvh, 900px); }
+}
+
+/* 3 · iOS zooms the whole page when you focus an input whose font is under
+ *     16px. Nothing else on the page causes as much layout damage, and the
+ *     only cure is to keep every focusable field at 16px on touch screens. */
+@media (max-width: 860px) {
+  .input, .select, textarea, .search__input, select {
+    font-size: 16px;
+  }
+}
+
+/* 4 · Thumb-sized targets on anything with a coarse pointer, regardless of
+ *     screen width — a tablet is wide and still touched. */
+@media (pointer: coarse) {
+  /* Everything clickable, rather than a list of components that someone will
+     forget to extend — the audit caught two buttons missed by the list. */
+  button, [role="button"], a.btn, .icon-btn, .tab, summary,
+  input[type="checkbox"], input[type="radio"], select,
+  .agency__call, .agency__link, .saved__item {
+    min-height: 44px;
+  }
+  .icon-btn, .account-btn { min-width: 44px; }
+  /* These carry their own min-height, which out-specifies the element
+     selector above, so they have to be named. */
+  .toast__action { min-height: 44px; }
+  .toast__close  { min-width: 44px; min-height: 44px; }
+  /* Segmented controls hold their options inside a fixed-height shell, so the
+     option itself must fill it rather than set its own height. */
+  .seg__opt, .unit-toggle__opt { display: inline-flex; align-items: center; min-height: 40px; }
+  .footer__links a { padding: 8px 0; }
+  .notif { padding: var(--sp-4) var(--sp-3); }
+  /* Hover styling that sticks after a tap looks like a stuck selection. */
+  a:hover { text-decoration: none; }
+}
+
+/* 5 · Very small and very old phones — 320px is a 1st-gen SE, and there are
+ *     still plenty of 360px Androids in Malaysia. Nothing may overflow. */
+@media (max-width: 380px) {
+  :root { --sp-5: 14px; --sp-6: 20px; --sp-7: 28px; --gutter: var(--sp-3); }
+  .card { padding: var(--sp-3); }
+  .forecast { grid-template-columns: 1fr; }
+  .admin-grid { grid-template-columns: 1fr; }
+  .hero__temp { font-size: clamp(56px, 22vw, 84px); }
+  .brand__text small { display: none; }
+  .dialog { padding: var(--sp-4); }
+  .toasts { left: var(--sp-2); right: var(--sp-2); bottom: var(--sp-2); }
+  .setup-steps { padding-left: 1.1em; }
+}
+
+/* 6 · Landscape on a phone: the viewport is ~360px tall, so a dialog sized
+ *     for portrait becomes unusable. */
+@media (max-height: 480px) and (orientation: landscape) {
+  .dialog { max-height: 94vh; padding: var(--sp-4); }
+  .notif-panel { max-height: 74vh; }
+  .chart-wrap { height: 170px; }
+}
+
+/* 7 · Anything that can be wider than the screen scrolls inside itself
+ *     rather than pushing the page sideways. */
+.table-scroll, .agency-groups, .notif-list {
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll { overscroll-behavior-x: contain; }
+
+/* 8 · The notification panel becomes a sheet on a phone: anchoring a 380px
+ *     popover to a button near the right edge pushes it off screen. */
+@media (max-width: 560px) {
+  .notif-panel {
+    position: fixed;
+    top: auto; right: var(--sp-2); left: var(--sp-2);
+    bottom: calc(var(--sp-2) + env(safe-area-inset-bottom, 0px));
+    width: auto; max-height: 68dvh;
+  }
 }
 
 /* Respect the OS setting and the in-app "reduce motion" switch alike */
@@ -1310,3 +1595,95 @@ select.input { cursor: pointer; appearance: none;
   body { background: #fff; color: #000; }
   .card { break-inside: avoid; border: 1px solid #ccc; box-shadow: none; }
 }
+
+/* ── Google sign-in: host + setup wizard ───────────────────────────────── */
+.google-host {
+  margin-top: var(--sp-3); padding: var(--sp-4);
+  border: 1px dashed var(--border-str); border-radius: var(--r-md);
+  background: var(--bg-sink); text-align: center;
+}
+.google-host__hint { margin: 0 0 var(--sp-3); font-size: 13px; color: var(--text-mut); }
+#google-render { display: flex; justify-content: center; min-height: 44px; }
+#google-cancel { margin-top: var(--sp-3); }
+
+/* `width` is already set on .dialog, so a max-width alone would never widen
+   it — the width itself has to be overridden. */
+.dialog--wide { width: min(94vw, 660px); }
+
+.setup-steps {
+  margin: var(--sp-4) 0; padding-left: 1.35em;
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  font-size: 14px; line-height: 1.65;
+}
+.setup-steps li { color: var(--text-mut); }
+.setup-steps li::marker { color: var(--c-brand-400); font-weight: 700; }
+.setup-steps strong { color: var(--text); display: inline; }
+.setup-steps em { color: var(--text); font-style: normal; font-weight: 600; }
+.setup-steps .btn { margin-top: var(--sp-2); }
+.setup-steps__note { display: block; margin-top: 4px; font-size: 13px; color: var(--text-dim); }
+.setup-steps .field { margin-top: var(--sp-3); margin-bottom: 0; }
+
+.copyrow {
+  display: flex; align-items: center; gap: var(--sp-2);
+  margin-top: var(--sp-2); flex-wrap: wrap;
+}
+.copyrow code {
+  flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere;
+  background: var(--bg-sink); border: 1px solid var(--border-str);
+  border-radius: var(--r-sm); padding: 8px 10px;
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, Consolas, monospace);
+  font-size: 13px; color: var(--c-brand-300, var(--c-brand-400));
+  user-select: all;
+}
+
+/* ── Admin database panel ──────────────────────────────────────────────── */
+.admin-grid {
+  display: grid; gap: var(--sp-3); margin: var(--sp-4) 0;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+.admin-stat {
+  background: var(--bg-sink); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: var(--sp-3);
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.admin-stat__label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); }
+.admin-stat__value { font-size: 14px; overflow-wrap: anywhere; }
+
+.admin-h3 { font-size: 14px; margin: var(--sp-5) 0 var(--sp-3); }
+.table--admin th, .table--admin td { white-space: nowrap; }
+.table--admin th[scope="row"] { white-space: normal; overflow-wrap: anywhere; }
+
+.tag {
+  display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 99px;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  vertical-align: middle;
+}
+.tag--owner { background: var(--c-brand-500); color: #fff; }
+
+.admin-note { margin-top: var(--sp-4); border-top: 1px solid var(--border); padding-top: var(--sp-3); }
+.admin-note > summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: var(--sp-2) 0; }
+.admin-note__body { font-size: 14px; line-height: 1.7; color: var(--text-mut); }
+.admin-note__body p { margin: 0 0 var(--sp-3); }
+.admin-note__body code {
+  background: var(--bg-sink); border: 1px solid var(--border); border-radius: 4px;
+  padding: 1px 5px; font-size: 12.5px; color: var(--c-brand-300, var(--c-brand-400));
+}
+.admin-note__links { display: flex; flex-wrap: wrap; gap: var(--sp-4); }
+.admin-note__links a { display: inline-flex; align-items: center; gap: 6px; }
+.admin-note__links svg { width: 14px; height: 14px; fill: currentColor; }
+
+.dialog__actions--wrap { flex-wrap: wrap; }
+
+/* ── Settings: version row and inline link-buttons ─────────────────────── */
+.version-row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-2); }
+.version-row code {
+  background: var(--bg-sink); border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: 6px 10px; font-family: var(--font-mono); font-size: 13px;
+}
+/* A button that reads as a link — used inside a hint sentence, where a real
+   button would break the line's rhythm. */
+.linkish {
+  background: none; border: 0; padding: 0; font: inherit; cursor: pointer;
+  color: var(--c-brand-400); text-decoration: underline; text-underline-offset: 2px;
+}
+.linkish:hover { color: var(--c-brand-300); }

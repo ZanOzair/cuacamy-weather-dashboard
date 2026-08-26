@@ -26,6 +26,7 @@ jobs:
           node --check sw.js
           node --check config.js
           node --check config.example.js
+          node --check tools/static-checks.mjs
 
       - name: Validate JSON
         run: node -e "JSON.parse(require('fs').readFileSync('manifest.webmanifest','utf8')); console.log('manifest ok')"
@@ -43,6 +44,11 @@ jobs:
           done
           [ $status -eq 0 ] && echo "all referenced assets present"
           exit $status
+
+      - name: Structural checks
+        # Duplicate ids, unresolvable selectors, CSP gaps, innerHTML, unguarded
+        # target="_blank", and version drift between app.js and sw.js.
+        run: node tools/static-checks.mjs
 
       - name: External API contract tests
         run: node tools/api-contract.mjs --dump

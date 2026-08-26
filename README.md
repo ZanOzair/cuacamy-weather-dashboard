@@ -40,10 +40,16 @@ A weather dashboard for Malaysia that behaves like a real product, not a tutoria
 | **Local climate normal** | Computes the 1991–2020 normal for *your* coordinates from 30 years of reanalysis, then shows this month's temperature and rainfall anomaly. |
 | **Analytical assistant** | Ask it questions in plain English. It answers from the loaded data and shows the readings behind each answer. |
 | **Navigation** | One-tap **Waze** and **Google Maps** deep links that hand off to the native app on mobile. |
-| **Accounts** | Sign up, sign in and sign out — locally with WebCrypto, or through Firebase with Google sign-in. |
+| **Accounts** | Sign up, sign in and sign out — locally with WebCrypto, through Google, or through Firebase. |
+| **Google sign-in without Firebase** | A guided wizard turns on *Sign in with Google* from a single OAuth client ID. No Firebase project, no billing account, about five minutes. |
+| **Admin database view** | The site owner can see every account on the device, its sign-in history and storage use, and export the lot as JSON or CSV — plus a plain explanation of where the data physically lives. |
+| **Official agency directory** | Seventeen Malaysian authorities — MetMalaysia, JPS InfoBanjir, NADMA, Bomba, APM, DOE, TNB, MCMC and the telcos — each with the number to ring and the page where a report is filed. |
+| **Notification centre** | Queued, stacking, dismissable alerts with actions, an unread badge, and a rolling history that survives a reload. |
 | **Sync** | Saved places and preferences persist in IndexedDB and mirror to Cloud Firestore when signed in. |
 | **Weather analysis** | 336 hourly observations — 7 days behind, 7 ahead — put through the standard meteorological treatments: descriptive statistics, diurnal cycles, rainfall structure, a wind rose, pressure tendency, WBGT heat stress and correlations. |
 | **Offline** | Full PWA: installable, service-worker cached, and usable in aeroplane mode. |
+| **Never stale** | The service worker is network-first for the app shell and stamped with the commit SHA at deploy time, so a returning visitor always runs the deployed build — with an in-app reload prompt when a new one lands. |
+| **Every phone** | Verified with no horizontal overflow across six handset viewports from a 320px iPhone SE up, with safe-area insets for notches, 44px touch targets and no iOS focus zoom. |
 
 ---
 
@@ -110,6 +116,67 @@ export default {
 Only free-tier endpoints are used, so a brand-new account is enough:
 `/data/2.5/weather`, `/data/2.5/forecast`, `/data/2.5/air_pollution`,
 `/geo/1.0/direct` and `/geo/1.0/reverse`.
+
+### Turning on Google sign-in (the five-minute route)
+
+Google will not let *any* website use Google accounts until that site is registered
+with Google. That is a rule on Google's side, not a limitation of this app, and there
+is no way around it — but there is a much cheaper route than standing up Firebase.
+
+**All you need is an OAuth 2.0 Web client ID.** Free, no billing account, no Firebase
+project. The app has a guided wizard: open the account dialog and press
+**Set up Google sign-in**. It shows you the exact origin to paste into Google Cloud
+and validates the client ID before saving it.
+
+<details>
+<summary><strong>The same steps, written out</strong></summary>
+
+1. Open [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials)
+   and create a project if you have none.
+2. **OAuth consent screen** → *External* → give it a name and your email → save.
+   Leaving it in *Testing* mode is fine; add your own address under *Test users*
+   and it works immediately.
+3. **Create credentials → OAuth client ID → Web application.**
+4. Add your site's address to **both** *Authorised JavaScript origins* and
+   *Authorised redirect URIs* — for example `https://yourname.github.io`.
+   It must match exactly, with no trailing slash.
+5. Copy the **Client ID** and paste it into the wizard, or set it in `config.js`:
+
+```js
+export default {
+  googleClientId: '1234567890-abcdefg.apps.googleusercontent.com'
+};
+```
+
+A client ID is a public identifier, not a secret — it is designed to be visible in
+the page, and it only works from the origins you authorised in step 4.
+
+**How the token is checked.** Google hands back a signed JWT. A static site has no
+server, so it cannot verify that signature itself — and simply decoding the payload
+would accept any forged token. Instead the app sends the token to Google's
+`tokeninfo` endpoint, which validates the signature, and then checks that `aud`
+matches your own client ID and `iss` is Google. That closes the obvious hole. It is
+still weaker than a real backend, because anything in a browser database can be
+edited by whoever owns the browser — the app says so in the sign-in dialog rather
+than implying otherwise.
+
+### Where the user database actually is
+
+Sign in, open your account, and press **Database & users**. It shows every account on
+the device, how each one signs in, when they were last seen, how many places they have
+saved, how much storage is in use, and exports to JSON or CSV.
+
+The honest answer to "where is my database" depends on how you have set the site up:
+
+| Setup | Where accounts live | Can you see them all? |
+|---|---|---|
+| Default | IndexedDB, database `cuacamy`, store `users`, in **each visitor's own browser** | No — there is no central table to see. Each browser holds its own. |
+| Firebase configured | **Cloud Firestore**, collection `users`, one document per account, in your own Google Cloud project | Yes — open the [Firebase console](https://console.firebase.google.com/). |
+
+A static site on GitHub Pages has no server, so by default there is nowhere for a
+shared database to run. That is genuinely private, and useless for "how many users do
+I have". If you want one real central database you can read as the owner, add a
+Firebase config — the app switches over automatically and the admin panel points at it.
 
 ### Enabling real accounts and cloud sync (optional)
 
@@ -410,6 +477,33 @@ and TTFB, graded against Google's published thresholds.
 
 ---
 
+## Staying up to date
+
+This project shipped a bug worth documenting, because it is one almost every PWA
+tutorial walks you into.
+
+The first service worker was cache-first for the whole app shell — the textbook
+recipe. Then a deploy fixed the Google sign-in flow, and users kept seeing the old
+text. The site was correct; their browsers were not fetching it. A browser only
+re-installs a service worker when the **worker's own source bytes** change, and
+`sw.js` had not been touched, so the cached shell was served indefinitely with
+nothing in the UI to say a newer build existed.
+
+Three changes make that unrepeatable:
+
+1. **The app shell is network-first**, with a 4-second timeout and a cache fallback.
+   An online visitor always runs the deployed build; an offline one still gets the
+   last one that worked.
+2. **The deploy stamps the commit SHA into `sw.js`**, so the worker source differs on
+   every single publish and the browser cannot miss an update. CI fails the deploy if
+   the stamp is missing, or if the version in `app.js` and `sw.js` have drifted apart.
+3. **An update prompt.** When a new worker installs, a sticky notification offers
+   *Reload now*; the page reloads exactly once when the new worker takes control.
+
+If anyone is ever stuck anyway, `window.CuacaMY.hardRefresh()` in the browser console
+unregisters every worker, deletes every cache and reloads. Accounts and saved places
+are untouched.
+
 ## Browser support
 
 Chrome/Edge 90+, Firefox 90+, Safari 15.4+. Requires ES modules, `dialog`,
@@ -444,8 +538,12 @@ Everything is verified where it can be, and nothing is claimed that isn't:
 |---|---|
 | **Syntax & assets** | Every JS file parses; the manifest is valid JSON; every path referenced by `index.html` and the manifest exists |
 | **API contracts** | Calls all nine external endpoints for real and fails if a field the app reads disappears. Also runs daily, because an API can change on a day with no commits |
-| **End-to-end** | Drives the real site in Chromium against live APIs: rendered temperature, five forecast cards, a painted chart, the computed Air Pollutant Index, the hazard sweep, the earthquake feed, GloFAS, the assistant, the 30-year climate computation, a physical-plausibility bound on the climate anomaly, that nothing marked `[hidden]` is visible, a clean console, no failed requests, and zero horizontal overflow at 390px across all five views |
-| **Live site** | After each deploy, fetches the published URL and fails unless it returns 200 and serves the app and its assets |
+| **End-to-end** | Drives the real site in Chromium against live APIs: rendered temperature, five forecast cards, a painted chart, the computed Air Pollutant Index, the hazard sweep, the earthquake feed, GloFAS, the assistant, the 30-year climate computation, a physical-plausibility bound on the climate anomaly, that nothing marked `[hidden]` is visible, a clean console and no failed requests |
+| **Notifications** | Queue depth, that one dismissal promotes exactly one queued item, that an urgent alert jumps the queue, that a sticky alert has no auto-dismiss timer, that an id collapses repeats on screen *and* in the queue, and that "clear all" really empties the history |
+| **Sign-in** | That the Google button is never disabled, that pressing it with no provider opens the setup wizard, that the wizard shows the correct origin, and that a malformed client ID is rejected before Google ever sees it |
+| **Agency directory** | All five groups and seventeen agencies render, every outbound link is `https` with `rel="noopener noreferrer"`, and every phone number is a tappable `tel:` link |
+| **Phones** | Zero horizontal overflow across six handset viewports (320 – 844px, portrait and landscape) × five views, no control under 40px, and no input under 16px so iOS never zooms on focus |
+| **Live site** | After each deploy, fetches the published URL and fails unless it returns 200, serves every asset, carries a stamped `sw.js`, and has no version drift between `app.js` and `sw.js` |
 
 That last category exists because this project was built in a sandbox whose egress policy
 blocks every one of these hosts. Rather than assert correctness it could not observe, the

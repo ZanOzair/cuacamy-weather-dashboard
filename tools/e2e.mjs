@@ -245,6 +245,105 @@ const google = await page.evaluate(() => ({
 check('Google button is actionable, not disabled', google.disabled === false, google.label);
 await page.keyboard.press('Escape');
 
+/* ── The notification system ─────────────────────────────────────────────
+ * Every one of these assertions exists because the behaviour it checks was
+ * broken at some point: toasts stacked without limit, a dismissal drained two
+ * queue slots at once, a sticky hazard warning queued behind four routine
+ * confirmations, and "clear all" logged its own confirmation back into the
+ * list it had just emptied. */
+await page.evaluate(() => {
+  for (let i = 0; i < 9; i += 1) window.CuacaMY.toast('Queue test ' + i, 'info', { title: 'Q' + i });
+});
+await page.waitForTimeout(400);
+const stacked = await page.$$eval('.toast', (n) => n.length);
+check('At most 4 toasts on screen; the rest queue', stacked === 4, `${stacked} shown`);
+
+await page.click('.toast .toast__close');
+await page.waitForTimeout(700);
+const afterDismiss = await page.$$eval('.toast', (n) => n.length);
+check('Dismissing one toast promotes exactly one from the queue', afterDismiss === 4, `${afterDismiss} shown`);
+
+const jumped = await page.evaluate(async () => {
+  window.CuacaMY.toast('URGENT-JUMP', 'hazard', { sticky: true, title: 'Urgent', id: 'e2e:urgent' });
+  await new Promise((r) => setTimeout(r, 300));
+  return [...document.querySelectorAll('.toast')].some((n) => n.textContent.includes('URGENT-JUMP'));
+});
+check('An urgent alert jumps the queue instead of waiting behind routine toasts', jumped);
+
+const noTimer = await page.$$eval('.toast', (ns) =>
+  ns.some((n) => n.textContent.includes('URGENT-JUMP') && !n.querySelector('.toast__timer')));
+check('A sticky alert has no auto-dismiss timer', noTimer);
+
+await page.evaluate(() => {
+  window.CuacaMY.toast('One', 'warn', { id: 'e2e:dup', title: 'Dup' });
+  window.CuacaMY.toast('Two', 'warn', { id: 'e2e:dup', title: 'Dup' });
+});
+await page.waitForTimeout(500);
+// Count copies wherever they are. Asserting only on what is painted would pass
+// while a hundred identical warnings piled up invisibly in the queue.
+const dupes = await page.evaluate(() => {
+  const t = window.CuacaMY.toasts();
+  return [...t.visible, ...t.queued].filter((m) => m === 'One' || m === 'Two').length;
+});
+check('An id collapses repeats on screen and in the queue alike', dupes === 1, `${dupes} copies`);
+
+await page.click('#btn-notif');
+await page.waitForTimeout(300);
+check('The notification centre opens', await page.isVisible('#notif-panel'));
+check('It lists the history', (await page.$$eval('#notif-list .notif', (n) => n.length)) > 0);
+check('Opening it clears the unread badge', await page.isHidden('#notif-count'));
+await page.click('#btn-notif-clear');
+await page.waitForTimeout(400);
+const cleared = await page.$$eval('#notif-list .notif', (n) => n.length);
+check('Clear all really empties the history', cleared === 0, `${cleared} left`);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+
+/* ── Google sign-in setup wizard ─────────────────────────────────────── */
+await page.click('#btn-account');
+await page.waitForTimeout(400);
+await page.click('#btn-google');
+await page.waitForTimeout(500);
+check('Pressing Google with no provider opens the setup wizard', await page.isVisible('#google-setup-dialog'));
+const shownOrigin = await page.textContent('#gs-origin');
+check('The wizard shows the exact origin to authorise with Google',
+  shownOrigin === new URL(BASE).origin, shownOrigin);
+await page.fill('#gs-client-id', 'not-a-client-id');
+await page.click('#gs-save');
+await page.waitForTimeout(300);
+check('A malformed client ID is rejected before Google ever sees it',
+  (await page.textContent('#gs-err')).length > 0);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+
+/* ── Official agency directory ───────────────────────────────────────── */
+await page.click('#tab-alerts');
+await page.waitForTimeout(1200);
+const agencyGroups = await page.$$eval('.agency-group', (n) => n.length);
+const agencyCount  = await page.$$eval('.agency', (n) => n.length);
+check('The agency directory renders every group', agencyGroups === 5, `${agencyGroups} groups`);
+check('The agency directory renders every entry', agencyCount >= 16, `${agencyCount} agencies`);
+const unsafeLinks = await page.$$eval('.agency__link, .footer__links a', (ns) =>
+  ns.filter((a) => !/^https:\/\//.test(a.href) || a.rel !== 'noopener noreferrer')
+    .map((a) => a.textContent.trim()));
+check('Every outbound agency link is https and rel-protected',
+  unsafeLinks.length === 0, unsafeLinks.slice(0, 3).join(', '));
+const telLinks = await page.$$eval('.agency__call', (ns) => ns.map((a) => a.getAttribute('href')));
+check('Agency phone numbers are tappable tel: links',
+  telLinks.length >= 10 && telLinks.every((h) => h.startsWith('tel:')), `${telLinks.length} numbers`);
+check('999 is one tap away in the footer',
+  (await page.getAttribute('.footer__999', 'href')) === 'tel:999');
+notes.push(`Agency directory: ${agencyCount} agencies across ${agencyGroups} groups, ${telLinks.length} phone numbers`);
+
+/* ── Saved places explain themselves ─────────────────────────────────── */
+await page.click('#tab-dashboard');
+await page.waitForTimeout(500);
+const emptyText = (await page.textContent('#saved-empty')).replace(/\s+/g, ' ').trim();
+check('The saved-places empty state explains what it is for', emptyText.length > 120, emptyText.slice(0, 60) + '…');
+check('…and offers a way out of it', await page.isVisible('#saved-empty-cta'));
+
 // Every view, on a phone, with no horizontal overflow.
 const mobile = await context.newPage();
 await mobile.goto(BASE, { waitUntil: 'load' });
@@ -252,13 +351,61 @@ await mobile.setViewportSize({ width: 390, height: 844 });
 await waitFor(mobile, 'mobile dashboard populated',
   () => /^-?\d+$/.test((document.querySelector('#cur-temp')?.textContent || '').trim()),
   { timeout: 60000 });
-for (const view of ['dashboard', 'alerts', 'climate', 'explore', 'analytics']) {
-  await mobile.click('#tab-' + view);
-  await mobile.waitForTimeout(view === 'analytics' ? 9000 : 700);
-  const overflow = await mobile.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-  check(`No horizontal overflow at 390px — ${view}`, overflow <= 0, `${overflow}px`);
+/* Real handset sizes rather than one convenient width. 320 is a first-
+ * generation SE, 360 is the most common Android in Malaysia, and the
+ * landscape entry catches dialogs sized only for portrait. */
+const HANDSETS = [
+  { name: 'iPhone SE 320',  width: 320, height: 568 },
+  { name: 'Android 360',    width: 360, height: 800 },
+  { name: 'iPhone 390',     width: 390, height: 844 },
+  { name: 'Pixel 412',      width: 412, height: 915 },
+  { name: 'Max 430',        width: 430, height: 932 },
+  { name: 'Landscape 844',  width: 844, height: 390 }
+];
+for (const device of HANDSETS) {
+  await mobile.setViewportSize({ width: device.width, height: device.height });
+  await mobile.waitForTimeout(300);
+  for (const view of ['dashboard', 'alerts', 'climate', 'explore', 'analytics']) {
+    await mobile.click('#tab-' + view);
+    await mobile.waitForTimeout(view === 'analytics' ? 6000 : 600);
+    const overflow = await mobile.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    check(`${device.name} · ${view} — no horizontal overflow`, overflow <= 1, `${overflow}px`);
+  }
 }
+notes.push(`Layout verified across ${HANDSETS.length} handset viewports × 5 views`);
+
+/* Touch targets. A control smaller than 44px is a miss waiting to happen, and
+ * an input under 16px makes iOS zoom the whole page on focus. */
+const touch = await context.newPage();
+await touch.setViewportSize({ width: 390, height: 844 });
+await touch.goto(BASE, { waitUntil: 'load' });
+await waitFor(touch, 'touch-target page ready',
+  () => Boolean(document.querySelector('#place-name')?.textContent?.trim()), { timeout: 60000 });
+await touch.click('#tab-alerts');
+await touch.waitForTimeout(1500);
+const undersized = await touch.$$eval(
+  'button, a.btn, .icon-btn, .tab, .agency__call, .agency__link',
+  (ns) => ns.filter((n) => {
+    const b = n.getBoundingClientRect();
+    return b.width > 0 && b.height > 0 && b.height < 40;
+  }).map((n) => (n.id || n.className) + ':' + Math.round(n.getBoundingClientRect().height)));
+check('No control is smaller than a fingertip', undersized.length === 0, undersized.slice(0, 5).join(', '));
+const zoomers = await touch.$$eval('input, select, textarea', (ns) =>
+  ns.filter((n) => parseFloat(getComputedStyle(n).fontSize) < 16).map((n) => n.id));
+check('No input under 16px, so iOS never zooms on focus', zoomers.length === 0, zoomers.join(', '));
+
+/* The service worker must register, or offline support and the update prompt
+ * both quietly do nothing. isSecureContext — not a hostname string — is the
+ * rule the browser actually applies. */
+const swState = await touch.evaluate(async () => {
+  if (!('serviceWorker' in navigator)) return { supported: false };
+  const regs = await navigator.serviceWorker.getRegistrations();
+  return { supported: true, secure: window.isSecureContext, count: regs.length };
+});
+check('The service worker registers', swState.count >= 1, JSON.stringify(swState));
+check('A hard-refresh escape hatch is published',
+  await touch.evaluate(() => typeof window.CuacaMY?.hardRefresh === 'function'));
 
 // [hidden] is a user-agent rule, so any author `display` declaration silently
 // overrides it. Assert nothing marked hidden is actually on screen.

@@ -103,20 +103,25 @@ jobs:
           # The stale-build trap this project hit once already: verify the
           # deployed worker really carries this commit's stamp, so a visitor's
           # browser is guaranteed to see new bytes and re-install.
-          curl -sSL --max-time 20 "${url}sw.js" -o sw.js
-          if grep -q "const BUILD_ID = 'dev';" sw.js; then
-            echo "::error::The live sw.js is unstamped — returning visitors would be pinned to the cached build."
+          curl -sSL --max-time 20 "${url}sw.js" -o live-sw.js
+          if grep -q "BUILD_ID = 'dev'" live-sw.js; then
+            echo "::error::The live sw.js is unstamped - returning visitors would stay pinned to the cached build."
             exit 1
           fi
-          echo "  live sw.js build: $(grep -o \"BUILD_ID = '[^']*'\" sw.js)"
+          live_build=$(sed -n "s/^const BUILD_ID = '\([^']*\)'.*$/\1/p" live-sw.js | head -1)
+          echo "  live sw.js build: ${live_build}"
+          if [ "$live_build" != "${GITHUB_SHA:0:12}" ]; then
+            echo "::error::The live sw.js carries build ${live_build}, expected ${GITHUB_SHA:0:12}."
+            exit 1
+          fi
 
-          # The version in app.js and the one in sw.js must not drift apart.
-          curl -sSL --max-time 20 "${url}app.js" -o app.js
-          app_v=$(grep -o \"^const VERSION = '[^']*'\" app.js | head -1 | sed \"s/.*'\\(.*\\)'/\\1/\")
-          sw_v=$(grep -o \"^const VERSION  = '[^']*'\" sw.js | head -1 | sed \"s/.*'v\\(.*\\)'/\\1/\")
-          echo "  app.js v${app_v} · sw.js v${sw_v}"
-          if [ "$app_v" != "$sw_v" ]; then
-            echo "::error::Version drift: app.js says ${app_v}, sw.js says ${sw_v}."
+          # app.js and sw.js must not drift apart in version.
+          curl -sSL --max-time 20 "${url}app.js" -o live-app.js
+          app_v=$(sed -n "s/^const VERSION = '\([^']*\)'.*$/\1/p" live-app.js | head -1)
+          sw_v=$(sed -n "s/^const VERSION  *= 'v\([^']*\)'.*$/\1/p" live-sw.js | head -1)
+          echo "  app.js v${app_v} / sw.js v${sw_v}"
+          if [ -z "$app_v" ] || [ "$app_v" != "$sw_v" ]; then
+            echo "::error::Version drift: app.js says '${app_v}', sw.js says '${sw_v}'."
             exit 1
           fi
 

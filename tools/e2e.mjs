@@ -377,8 +377,18 @@ notes.push(`Layout verified across ${HANDSETS.length} handset viewports × 5 vie
 
 /* Touch targets. A control smaller than 44px is a miss waiting to happen, and
  * an input under 16px makes iOS zoom the whole page on focus. */
-const touch = await context.newPage();
-await touch.setViewportSize({ width: 390, height: 844 });
+// This needs its OWN context: the 44px rules are behind `@media (pointer:
+// coarse)`, and resizing a desktop context does not make that match. Without
+// hasTouch the check silently measures the mouse layout and reports failures
+// that do not exist on a phone.
+const touchContext = await browser.newContext({
+  viewport: { width: 390, height: 844 },
+  hasTouch: true,
+  isMobile: true,
+  deviceScaleFactor: 2,
+  locale: 'en-MY'
+});
+const touch = await touchContext.newPage();
 await touch.goto(BASE, { waitUntil: 'load' });
 await waitFor(touch, 'touch-target page ready',
   () => Boolean(document.querySelector('#place-name')?.textContent?.trim()), { timeout: 60000 });
@@ -418,7 +428,13 @@ check('Nothing marked [hidden] is visible', leaking.length === 0, leaking.join('
 // Console must be clean. Firebase is optional and absent here by design.
 const realErrors = consoleErrors.filter((e) => !/firebase|config\.js/i.test(e));
 check('No console errors', realErrors.length === 0, realErrors.slice(0, 3).join(' | '));
-const realFailures = requestFailures.filter((f) => !/firebase|config\.js/i.test(f));
+// ERR_ABORTED is what Chromium reports for AbortController.abort(), which this
+// app does on purpose: request timeouts, and superseding an in-flight fetch
+// when the user switches place before the first one lands. Counting a
+// deliberate cancellation as a failure would fail the build for working
+// correctly. Every other failure category still counts.
+const realFailures = requestFailures.filter((f) =>
+  !/firebase|config\.js/i.test(f) && !/ERR_ABORTED/.test(f));
 check('No failed requests', realFailures.length === 0, realFailures.slice(0, 3).join(' | '));
 
 await browser.close();

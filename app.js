@@ -7192,11 +7192,22 @@ function registerServiceWorker() {
   // other trustworthy origin, and silently disabled offline support there.
   if (!window.isSecureContext) return;
 
-  // A worker that has taken over mid-session is running against HTML and CSS
-  // that may predate it. Reloading once, and only once, resolves that without
-  // an infinite loop if something goes wrong.
+  // A worker that takes over MID-SESSION is running against HTML and CSS that
+  // may predate it, so the page reloads once to get back in step.
+  //
+  // The first visit is the exception, and getting it wrong is expensive: on a
+  // brand-new visit there is no controller, the freshly installed worker calls
+  // clients.claim(), controllerchange fires — and reloading there throws away
+  // a page that is already correct, cancelling the weather requests in flight.
+  // So the reload is conditional on there having been a controller to replace.
+  const hadController = Boolean(navigator.serviceWorker.controller);
   let reloading = false;
+
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) {
+      Telemetry.record('sw', { lvl: 'info', msg: 'Service worker took control of a first visit; no reload needed' });
+      return;
+    }
     if (reloading) return;
     reloading = true;
     if (sessionStorage.getItem('cuacamy.sw.reloaded') === '1') return;

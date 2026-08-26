@@ -73,56 +73,66 @@ jobs:
           set -uo pipefail
           owner="$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')"
           url="https://${owner}.github.io/${GITHUB_REPOSITORY#*/}/"
-          echo "Checking $url"
+          want="${GITHUB_SHA:0:12}"
+          echo "Checking $url for build ${want}"
 
-          code=000
+          # Wait for THIS build, not merely for the site to answer.
+          #
+          # The obvious loop — poll until the root returns 200 — passes instantly on
+          # every deploy, because the previous build is already being served. Pages sits
+          # behind a CDN, so for a minute or so after a push the old bytes are still
+          # going out. That is exactly the stale-build condition this job exists to
+          # catch, and the naive wait was blind to it: on the first run it "verified"
+          # a copy of sw.js from the commit before.
+          #
+          # So the success condition is the deployed worker carrying this commit's
+          # stamp. The real URL is polled, with no cache-buster, because a cache-buster
+          # would test a URL no visitor ever requests.
+          live_build=""
           for attempt in $(seq 1 40); do
-            code=$(curl -sSL -o page.html -w '%{http_code}' --max-time 20 "$url" || echo 000)
-            if [ "$code" = "200" ] && grep -q 'CuacaMY' page.html; then
-              echo "Live after ${attempt} attempt(s)."
-              break
+            code=$(curl -sSL -H 'Cache-Control: no-cache' -o live-sw.js -w '%{http_code}' --max-time 20 "${url}sw.js" || echo 000)
+            if [ "$code" = "200" ]; then
+              live_build=$(sed -n "s/^const BUILD_ID = '\([^']*\)'.*$/\1/p" live-sw.js | head -1)
+              if [ "$live_build" = "$want" ]; then
+                echo "Build ${want} live after ${attempt} attempt(s)."
+                break
+              fi
             fi
-            echo "  attempt ${attempt}: HTTP ${code} — waiting…"
+            echo "  attempt ${attempt}: HTTP ${code}, serving build '${live_build:-none}' - waiting for ${want}..."
+            live_build=""
             sleep 15
           done
 
-          if [ "$code" != "200" ]; then
-            echo "::error::Site did not come up. Last status: HTTP ${code} at ${url}"
+          if [ "$live_build" != "$want" ]; then
+            echo "::error::${url}sw.js never served build ${want}. The CDN may still be catching up, or the publish did not land."
             exit 1
           fi
 
-          # The shell must not just exist — its assets must load too.
-          fail=0
-          for asset in app.js style.css manifest.webmanifest assets/icon-192.png sw.js; do
-            a=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 20 "${url}${asset}" || echo 000)
-            echo "  ${asset}: HTTP ${a}"
-            [ "$a" = "200" ] || fail=1
-          done
-          [ $fail -eq 0 ] || { echo "::error::One or more assets failed to load."; exit 1; }
-
-          # The stale-build trap this project hit once already: verify the
-          # deployed worker really carries this commit's stamp, so a visitor's
-          # browser is guaranteed to see new bytes and re-install.
-          curl -sSL --max-time 20 "${url}sw.js" -o live-sw.js
           if grep -q "BUILD_ID = 'dev'" live-sw.js; then
             echo "::error::The live sw.js is unstamped - returning visitors would stay pinned to the cached build."
             exit 1
           fi
-          live_build=$(sed -n "s/^const BUILD_ID = '\([^']*\)'.*$/\1/p" live-sw.js | head -1)
-          echo "  live sw.js build: ${live_build}"
-          if [ "$live_build" != "${GITHUB_SHA:0:12}" ]; then
-            echo "::error::The live sw.js carries build ${live_build}, expected ${GITHUB_SHA:0:12}."
-            exit 1
-          fi
+
+          # The shell must not just exist - its assets must load too.
+          fail=0
+          for asset in "" index.html app.js style.css manifest.webmanifest assets/icon-192.png; do
+            a=$(curl -sSL -o page.out -w '%{http_code}' --max-time 20 "${url}${asset}" || echo 000)
+            echo "  ${asset:-/}: HTTP ${a}"
+            [ "$a" = "200" ] || fail=1
+          done
+          [ $fail -eq 0 ] || { echo "::error::One or more assets failed to load."; exit 1; }
+
+          curl -sSL --max-time 20 "${url}index.html" -o live-index.html
+          grep -q 'CuacaMY' live-index.html || { echo "::error::The served page is not CuacaMY."; exit 1; }
 
           # app.js and sw.js must not drift apart in version.
-          curl -sSL --max-time 20 "${url}app.js" -o live-app.js
+          curl -sSL -H 'Cache-Control: no-cache' --max-time 20 "${url}app.js" -o live-app.js
           app_v=$(sed -n "s/^const VERSION = '\([^']*\)'.*$/\1/p" live-app.js | head -1)
           sw_v=$(sed -n "s/^const VERSION  *= 'v\([^']*\)'.*$/\1/p" live-sw.js | head -1)
-          echo "  app.js v${app_v} / sw.js v${sw_v}"
+          echo "  app.js v${app_v} / sw.js v${sw_v} / build ${live_build}"
           if [ -z "$app_v" ] || [ "$app_v" != "$sw_v" ]; then
             echo "::error::Version drift: app.js says '${app_v}', sw.js says '${sw_v}'."
             exit 1
           fi
 
-          echo "::notice::Live and serving correctly at ${url}"
+          echo "::notice::Live at ${url} serving v${app_v} build ${live_build}"

@@ -465,8 +465,12 @@ function toast(message, type = 'info', opts = 4200) {
 
   if (toastLive.size >= TOAST_MAX_VISIBLE) {
     if (!urgent) { toastQueue.push(item); return; }
+    // Evict WITHOUT refilling from the queue: the freed slot is for the urgent
+    // toast. Letting the normal drain run would immediately promote a queued
+    // routine toast into it, and the urgent one would then push the count past
+    // the cap.
     const evictable = [...toastLive.values()].find((n) => n._toast && n._toast.ms > 0);
-    if (evictable) dismissToast(evictable, true);
+    if (evictable) dismissToast(evictable, true, false);
     else { toastQueue.unshift(item); return; }
   }
   showToast(item);
@@ -525,7 +529,7 @@ function startToastTimer(node, ms) {
   node._timer = setTimeout(() => dismissToast(node), ms);
 }
 
-function dismissToast(node, immediate = false) {
+function dismissToast(node, immediate = false, refill = true) {
   if (!node || node._gone) return;
   node._gone = true;
   clearTimeout(node._timer);
@@ -543,6 +547,7 @@ function dismissToast(node, immediate = false) {
     if (drained) return;
     drained = true;
     node.remove();
+    if (!refill) return;
     const next = toastQueue.shift();
     if (next) showToast(next);
   };

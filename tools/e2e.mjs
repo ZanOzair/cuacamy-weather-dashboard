@@ -274,6 +274,16 @@ const noTimer = await page.$$eval('.toast', (ns) =>
   ns.some((n) => n.textContent.includes('URGENT-JUMP') && !n.querySelector('.toast__timer')));
 check('A sticky alert has no auto-dismiss timer', noTimer);
 
+// Jumping the queue must not also break the cap. Evicting a toast used to run
+// the normal drain, which promoted a queued item into the slot the urgent
+// alert was meant to take, leaving five on screen.
+const capped = await page.evaluate(() => {
+  const t = window.CuacaMY.toasts();
+  return { visible: t.visible.length, dom: document.querySelectorAll('.toast:not(.is-out)').length };
+});
+check('Queue-jumping still respects the four-toast cap',
+  capped.visible <= 4 && capped.dom <= 4, JSON.stringify(capped));
+
 await page.evaluate(() => {
   window.CuacaMY.toast('One', 'warn', { id: 'e2e:dup', title: 'Dup' });
   window.CuacaMY.toast('Two', 'warn', { id: 'e2e:dup', title: 'Dup' });

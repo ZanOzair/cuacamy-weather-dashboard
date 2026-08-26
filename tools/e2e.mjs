@@ -174,6 +174,77 @@ if (climate.shown) {
         `${climate.anom} (normal ${climate.normalTemp}, observed ${climate.actualTemp})`);
 }
 
+// Weather analysis — the heaviest view, and the one the whole tab is now for.
+await page.click('#tab-analytics');
+await waitFor(page, 'weather analysis computed',
+  () => !document.querySelector('#wx-body')?.hidden ||
+        (document.querySelector('#wx-status')?.textContent || '').includes('Could not'),
+  { timeout: 90000 });
+
+const wx = await page.evaluate(() => {
+  const painted = (id) => {
+    const c = document.querySelector(id);
+    if (!c) return -1;
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n += 1;
+    return n;
+  };
+  return {
+    shown: !document.querySelector('#wx-body')?.hidden,
+    status: document.querySelector('#wx-status')?.textContent,
+    scope: document.querySelector('#wx-scope')?.textContent,
+    charts: {
+      temperature: painted('#wx-temp'),
+      diurnalTemp: painted('#wx-diurnal-temp'),
+      diurnalRain: painted('#wx-diurnal-rain'),
+      rainDaily: painted('#wx-rain-daily'),
+      rainCumulative: painted('#wx-rain-cum'),
+      windRose: painted('#wx-rose'),
+      pressure: painted('#wx-pressure'),
+      heatStress: painted('#wx-heat')
+    },
+    tables: document.querySelectorAll('.table--stats').length,
+    tableRows: document.querySelectorAll('.table--stats tbody tr').length,
+    insights: [...document.querySelectorAll('.viz-insight')]
+      .map((n) => n.textContent.trim()).filter((t) => t.length > 30).length,
+    legendItems: document.querySelectorAll('.viz-legend__item').length
+  };
+});
+
+check('Weather analysis computed', wx.shown, wx.shown ? wx.scope : wx.status);
+for (const [name, px] of Object.entries(wx.charts)) {
+  check(`Chart painted — ${name}`, px > 2000, `${px} px`);
+}
+check('Every figure has a table view', wx.tables >= 7, `${wx.tables} tables, ${wx.tableRows} rows`);
+check('Insight prose generated for each section', wx.insights >= 6, `${wx.insights} passages`);
+check('Legends present for multi-series charts', wx.legendItems >= 6, `${wx.legendItems} legend items`);
+notes.push(`Analysis scope: ${wx.scope}`);
+
+// The hover layer is part of the chart, not a nicety — verify it responds.
+const chart = await page.$('#wx-temp');
+if (chart) {
+  const box = await chart.boundingBox();
+  await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  await page.waitForTimeout(400);
+  const tip = await page.evaluate(() => {
+    const t = document.querySelector('#wx-temp')?.parentElement?.querySelector('.viz-tip');
+    return { shown: t && !t.hidden, text: (t?.textContent || '').slice(0, 80) };
+  });
+  check('Chart tooltip responds to hover', tip.shown, tip.text);
+}
+
+// Google sign-in must never be a dead button.
+await page.click('#tab-dashboard');
+await page.click('#btn-account');
+await page.waitForTimeout(400);
+const google = await page.evaluate(() => ({
+  disabled: document.querySelector('#btn-google')?.disabled,
+  label: document.querySelector('#btn-google-label')?.textContent
+}));
+check('Google button is actionable, not disabled', google.disabled === false, google.label);
+await page.keyboard.press('Escape');
+
 // Every view, on a phone, with no horizontal overflow.
 const mobile = await context.newPage();
 await mobile.goto(BASE, { waitUntil: 'load' });
@@ -183,7 +254,7 @@ await waitFor(mobile, 'mobile dashboard populated',
   { timeout: 60000 });
 for (const view of ['dashboard', 'alerts', 'climate', 'explore', 'analytics']) {
   await mobile.click('#tab-' + view);
-  await mobile.waitForTimeout(700);
+  await mobile.waitForTimeout(view === 'analytics' ? 9000 : 700);
   const overflow = await mobile.evaluate(
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   check(`No horizontal overflow at 390px — ${view}`, overflow <= 0, `${overflow}px`);

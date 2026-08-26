@@ -106,6 +106,27 @@ await check('Open-Meteo · forecast',
    'daily.sunrise', 'daily.sunset', 'daily.precipitation_sum',
    'daily.precipitation_probability_max', 'daily.wind_gusts_10m_max', 'daily.uv_index_max']);
 
+// The weather-analysis view asks for a much wider variable set over a 14-day
+// window; every field it reads is asserted here.
+await check('Open-Meteo · analysis record set (14 days, wide variable set)',
+  `${OM}?latitude=${LAT}&longitude=${LON}` +
+  `&hourly=temperature_2m,relative_humidity_2m,dew_point_2m,apparent_temperature,` +
+  `precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,` +
+  `visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day,shortwave_radiation` +
+  `&daily=temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,` +
+  `precipitation_hours,wind_speed_10m_max,wind_gusts_10m_max,wind_direction_10m_dominant,` +
+  `uv_index_max,shortwave_radiation_sum,sunrise,sunset` +
+  `&timezone=auto&past_days=7&forecast_days=7&wind_speed_unit=ms`,
+  ['utc_offset_seconds',
+   'hourly.time', 'hourly.dew_point_2m', 'hourly.apparent_temperature',
+   'hourly.relative_humidity_2m', 'hourly.precipitation', 'hourly.precipitation_probability',
+   'hourly.pressure_msl', 'hourly.cloud_cover', 'hourly.visibility',
+   'hourly.wind_speed_10m', 'hourly.wind_direction_10m', 'hourly.wind_gusts_10m',
+   'hourly.uv_index', 'hourly.is_day', 'hourly.shortwave_radiation',
+   'daily.time', 'daily.temperature_2m_mean', 'daily.precipitation_sum',
+   'daily.precipitation_hours', 'daily.wind_direction_10m_dominant',
+   'daily.shortwave_radiation_sum', 'daily.uv_index_max']);
+
 await check('Open-Meteo · air quality',
   `${AQ}?latitude=${LAT}&longitude=${LON}` +
   `&current=pm10,pm2_5,carbon_monoxide,nitrogen_dioxide,sulphur_dioxide,ozone,us_aqi,european_aqi` +

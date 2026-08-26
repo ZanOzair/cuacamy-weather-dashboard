@@ -61,6 +61,7 @@ const OWM = {
 
 const LS = {
   settings:  'cuacamy.settings.v1',
+  firebase:  'cuacamy.firebase.v1',
   apiKey:    'cuacamy.apikey.v1',
   session:   'cuacamy.session.v1',
   analytics: 'cuacamy.analytics.v1',
@@ -433,7 +434,8 @@ const Telemetry = {
     if (!this.enabled) return;
     this.log.push({ t: Date.now(), kind, ...detail });
     if (this.log.length > 400) this.log.splice(0, this.log.length - 400);
-    if (activeView === 'analytics') scheduleAnalyticsRender();
+    /* The analytics view is weather analysis now; telemetry only feeds the
+       collapsed diagnostics panel, which is painted when that view opens. */
   },
 
   timing(endpoint, ms, ok) {
@@ -509,7 +511,6 @@ function observeVitals() {
     new PerformanceObserver((list) => {
       const entries = list.getEntries();
       Telemetry.vitals.lcp = entries[entries.length - 1].startTime;
-      scheduleAnalyticsRender();
     }).observe({ type: 'largest-contentful-paint', buffered: true });
   } catch { /* noop */ }
 
@@ -519,7 +520,6 @@ function observeVitals() {
         // Shifts the user caused (by scrolling, clicking) are not penalised.
         if (!entry.hadRecentInput) Telemetry.vitals.cls += entry.value;
       }
-      scheduleAnalyticsRender();
     }).observe({ type: 'layout-shift', buffered: true });
   } catch { /* noop */ }
 
@@ -529,7 +529,6 @@ function observeVitals() {
         const d = entry.duration;
         if (Telemetry.vitals.inp === null || d > Telemetry.vitals.inp) Telemetry.vitals.inp = d;
       }
-      scheduleAnalyticsRender();
     }).observe({ type: 'event', durationThreshold: 40, buffered: true });
   } catch { /* noop */ }
 }
@@ -1640,8 +1639,15 @@ const Auth = {
   _emit() { this._listeners.forEach((fn) => fn(this.user)); },
 
   /** Try Firebase; fall back to local mode on any failure. */
+  /** Firebase config from config.js, or pasted into Settings by the user. */
+  config() {
+    if (CONFIG.firebase && CONFIG.firebase.apiKey) return CONFIG.firebase;
+    const stored = safeLocal.json(LS.firebase, null);
+    return stored && stored.apiKey ? stored : null;
+  },
+
   async init() {
-    if (CONFIG.firebase && CONFIG.firebase.apiKey) {
+    if (this.config()) {
       try {
         await this._initFirebase();
         this.mode = 'firebase';
@@ -1661,7 +1667,7 @@ const Auth = {
       import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
       import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`)
     ]);
-    const app = appMod.initializeApp(CONFIG.firebase);
+    const app = appMod.initializeApp(this.config());
     const auth = authMod.getAuth(app);
     const db = fsMod.getFirestore(app);
 
@@ -1728,7 +1734,7 @@ const Auth = {
 
   async signInWithGoogle() {
     if (this.mode !== 'firebase') {
-      throw new Error('Google sign-in needs Firebase. Add your Firebase config to config.js to enable it.');
+      throw new Error('NEEDS_FIREBASE');
     }
     const { GoogleAuthProvider, signInWithPopup } = this._fb.authMod;
     const provider = new GoogleAuthProvider();
@@ -1901,6 +1907,7 @@ async function loadPlace(place, { silent = false } = {}) {
   // dashboard has already painted rather than delaying it.
   runHazards();
 
+  wxState = null;   // the analysis record set belongs to the previous place
   Telemetry.place(place.name);
   Telemetry.record('view', { lvl: 'info', msg: `${place.name} rendered in ${fmt.ms(performance.now() - started)}` });
   Telemetry.save();
@@ -2416,42 +2423,6 @@ function hexToRgba(color, alpha) {
   return nums ? `rgba(${nums[0]}, ${nums[1]}, ${nums[2]}, ${alpha})` : `rgba(71,168,255,${alpha})`;
 }
 
-function renderLatencyChart() {
-  const canvas = $('#latency-chart');
-  if (!canvas || canvas.offsetParent === null) return;
-  const { ctx, w, h } = setupCanvas(canvas);
-  const data = Telemetry.latencies.slice(-40);
-
-  if (!data.length) {
-    ctx.fillStyle = themeColor('--text-dim', '#6b7899');
-    ctx.font = '13px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('No requests recorded yet', w / 2, h / 2);
-    return;
-  }
-
-  const max = Math.max(...data.map((d) => d.ms), 100) * 1.15;
-  const barW = Math.max(3, (w - 8) / data.length - 3);
-  const good = themeColor('--c-good', '#34d399');
-  const warn = themeColor('--c-warn', '#fbbf24');
-  const bad  = themeColor('--c-bad',  '#f87171');
-
-  data.forEach((d, i) => {
-    const bh = Math.max(2, (d.ms / max) * (h - 22));
-    const bx = 4 + i * ((w - 8) / data.length);
-    ctx.fillStyle = !d.ok ? bad : d.ms < 400 ? good : d.ms < 1200 ? warn : bad;
-    roundRect(ctx, bx, h - 18 - bh, barW, bh, 2);
-    ctx.fill();
-  });
-
-  ctx.fillStyle = themeColor('--text-dim', '#6b7899');
-  ctx.font = '11px system-ui, sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText('oldest', 4, h - 4);
-  ctx.textAlign = 'right';
-  ctx.fillText(`newest · peak ${fmt.ms(Math.max(...data.map((d) => d.ms)))}`, w - 4, h - 4);
-}
-
 function roundRect(ctx, x, y, w, h, r) {
   const radius = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
@@ -2461,37 +2432,6 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y + h, x, y, radius);
   ctx.arcTo(x, y, x + w, y, radius);
   ctx.closePath();
-}
-
-function renderCacheDonut() {
-  const canvas = $('#cache-donut');
-  if (!canvas || canvas.offsetParent === null) return;
-  const { ctx, w, h } = setupCanvas(canvas);
-  const { hit, miss } = Telemetry.counts;
-  const total = hit + miss;
-  const ratio = total ? hit / total : 0;
-
-  const cx = w / 2, cy = h / 2;
-  const radius = Math.min(w, h) / 2 - 12;
-  const thickness = Math.max(12, radius * 0.32);
-
-  ctx.lineWidth = thickness;
-  ctx.lineCap = 'round';
-
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.strokeStyle = themeColor('--surface-3', 'rgba(255,255,255,.11)');
-  ctx.stroke();
-
-  if (ratio > 0) {
-    const start = -Math.PI / 2;
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, start, start + Math.PI * 2 * ratio);
-    ctx.strokeStyle = themeColor('--c-good', '#34d399');
-    ctx.stroke();
-  }
-
-  $('#cache-pct').textContent = Math.round(ratio * 100) + '%';
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2752,108 +2692,13 @@ async function renderCapitalComparison() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
- * 16 · ANALYTICS VIEW
+ * 16 · APP DIAGNOSTICS
+ * ---------------------------------------------------------------------------
+ * Core Web Vitals and API timings used to be the Analytics tab. They measure
+ * the site, not the weather, so they now live in a collapsed panel at the foot
+ * of the analysis view — useful when something feels slow, and out of the way
+ * the rest of the time. The tab itself is meteorology (sections 31-33).
  * ═══════════════════════════════════════════════════════════════════════════ */
-
-/** Web Vitals thresholds published by the Chrome team. */
-const VITAL_BUDGETS = {
-  lcp:  { good: 2500, ok: 4000 },
-  cls:  { good: 0.1,  ok: 0.25 },
-  inp:  { good: 200,  ok: 500 },
-  ttfb: { good: 800,  ok: 1800 }
-};
-
-function gradeVital(key, value) {
-  if (value === null || value === undefined) return '';
-  const b = VITAL_BUDGETS[key];
-  return value <= b.good ? 'good' : value <= b.ok ? 'ok' : 'poor';
-}
-
-let analyticsFrame = null;
-function scheduleAnalyticsRender() {
-  if (activeView !== 'analytics' || analyticsFrame) return;
-  analyticsFrame = requestAnimationFrame(() => { analyticsFrame = null; renderAnalytics(); });
-}
-
-function renderAnalytics() {
-  const v = Telemetry.vitals;
-
-  const setVital = (id, value, text) => {
-    $('#kpi-' + id).textContent = text;
-    const grade = $('#kpi-' + id + '-g');
-    const g = gradeVital(id, value);
-    grade.textContent = g ? (g === 'good' ? 'Good' : g === 'ok' ? 'Needs work' : 'Poor') : 'Measuring…';
-    if (g) grade.dataset.g = g; else delete grade.dataset.g;
-  };
-
-  setVital('lcp',  v.lcp,  v.lcp  === null ? '—' : fmt.ms(v.lcp));
-  setVital('cls',  v.cls,  round(v.cls, 3).toFixed(3));
-  setVital('inp',  v.inp,  v.inp  === null ? '—' : fmt.ms(v.inp));
-  setVital('ttfb', v.ttfb, v.ttfb === null ? '—' : fmt.ms(v.ttfb));
-
-  const ms = Telemetry.latencies.map((l) => l.ms);
-  $('#st-req').textContent = String(Telemetry.counts.req);
-  $('#st-p50').textContent = fmt.ms(percentile(ms, 0.5));
-  $('#st-p95').textContent = fmt.ms(percentile(ms, 0.95));
-  $('#st-max').textContent = ms.length ? fmt.ms(Math.max(...ms)) : '—';
-  $('#st-err').textContent = String(Telemetry.counts.err);
-
-  $('#st-hit').textContent = String(Telemetry.counts.hit);
-  $('#st-miss').textContent = String(Telemetry.counts.miss);
-  $('#st-saved').textContent = fmt.bytes(Telemetry.counts.bytesSaved);
-
-  renderLatencyChart();
-  renderCacheDonut();
-  renderUsageBars();
-  renderEventLog();
-}
-
-function renderUsageBars() {
-  const host = $('#usage-bars');
-  const empty = $('#usage-empty');
-  host.replaceChildren();
-
-  const rows = Object.entries(Telemetry.places).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  if (!rows.length) { empty.hidden = false; return; }
-  empty.hidden = true;
-
-  const max = rows[0][1];
-  for (const [name, n] of rows) {
-    const row = el('div', { className: 'bar-row' });
-    row.appendChild(el('span', { className: 'bar-row__name', textContent: name, title: name }));
-    const track = el('span', { className: 'bar-row__track' });
-    const fill = el('span', { className: 'bar-row__fill' });
-    fill.style.setProperty('width', Math.round((n / max) * 100) + '%');
-    track.appendChild(fill);
-    row.appendChild(track);
-    row.appendChild(el('span', { className: 'bar-row__n', textContent: `${n}×` }));
-    host.appendChild(row);
-  }
-}
-
-function renderEventLog() {
-  const host = $('#event-log');
-  host.replaceChildren();
-  const rows = Telemetry.log.slice(-60).reverse();
-
-  if (!rows.length) {
-    host.appendChild(el('p', { className: 'empty', textContent: 'No events recorded yet.' }));
-    return;
-  }
-
-  const frag = document.createDocumentFragment();
-  for (const r of rows) {
-    const d = new Date(r.t);
-    const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
-    const row = el('div', { className: 'log__row' }, [
-      el('span', { className: 'log__t', textContent: time }),
-      el('span', { className: 'log__k', textContent: r.kind, dataset: { lvl: r.lvl || 'info' } }),
-      el('span', { className: 'log__m', textContent: r.msg || '' })
-    ]);
-    frag.appendChild(row);
-  }
-  host.appendChild(frag);
-}
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * 17 · SEARCH COMBOBOX
@@ -4497,6 +4342,1095 @@ function askAssistant() {
   $('#assistant-empty').hidden = true;
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 31 · WEATHER ANALYSIS
+ * ---------------------------------------------------------------------------
+ * The meteorology, separated from the drawing. Everything here is arithmetic
+ * over one hourly record set — no network, no DOM — so each figure can be
+ * checked against the raw series it came from.
+ *
+ * The record set spans 7 days behind and 7 days ahead, giving 336 hourly
+ * observations. That is enough for a diurnal cycle to emerge from the noise
+ * and for spell-length and correlation statistics to mean something; a single
+ * forecast day is not.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const WxData = {
+  cache: new Map(),
+
+  /** Fetch and shape the analysis record set for a place. */
+  async load(place, units) {
+    const key = `${round(place.lat, 2)}:${round(place.lon, 2)}:${units}`;
+    const hit = this.cache.get(key);
+    if (hit && Date.now() - hit.at < 30 * 60 * 1000) return hit.value;
+
+    const url = OpenMeteo.url(OM.forecast, {
+      latitude: round(place.lat, 4),
+      longitude: round(place.lon, 4),
+      hourly: 'temperature_2m,relative_humidity_2m,dew_point_2m,apparent_temperature,' +
+              'precipitation,precipitation_probability,weather_code,pressure_msl,cloud_cover,' +
+              'visibility,wind_speed_10m,wind_direction_10m,wind_gusts_10m,uv_index,is_day,' +
+              'shortwave_radiation',
+      daily: 'temperature_2m_max,temperature_2m_min,temperature_2m_mean,precipitation_sum,' +
+             'precipitation_hours,wind_speed_10m_max,wind_gusts_10m_max,' +
+             'wind_direction_10m_dominant,uv_index_max,shortwave_radiation_sum,sunrise,sunset',
+      timezone: 'auto',
+      past_days: 7,
+      forecast_days: 7,
+      ...OpenMeteo.units(units)
+    });
+
+    const { data } = await fetchJSON(url, { label: 'analysis', timeout: 20000 });
+    const shaped = this.shape(data, units);
+    this.cache.set(key, { value: shaped, at: Date.now() });
+    return shaped;
+  },
+
+  /** Flatten the parallel arrays into records and attach derived fields. */
+  shape(raw, units) {
+    const tz = raw.utc_offset_seconds ?? 0;
+    const h = raw.hourly || {};
+    const d = raw.daily || {};
+    const nowSec = Math.floor(Date.now() / 1000);
+    const toC = (v) => (units === 'imperial' ? (v - 32) * 5 / 9 : v);
+    const kmh = (v) => (units === 'imperial' ? v * 1.609344 : v * 3.6);
+
+    const hours = (h.time || []).map((t, i) => {
+      const dt = omTime(t, tz);
+      const tempC = toC(h.temperature_2m?.[i]);
+      const rh = h.relative_humidity_2m?.[i];
+      return {
+        dt, tz,
+        localHour: new Date((dt + tz) * 1000).getUTCHours(),
+        localDay: Math.floor((dt + tz) / 86400),
+        past: dt <= nowSec,
+        temp: h.temperature_2m?.[i],
+        tempC,
+        feels: h.apparent_temperature?.[i],
+        dew: h.dew_point_2m?.[i],
+        rh,
+        precip: h.precipitation?.[i] ?? 0,
+        pop: h.precipitation_probability?.[i] ?? 0,
+        code: h.weather_code?.[i],
+        pressure: h.pressure_msl?.[i],
+        cloud: h.cloud_cover?.[i],
+        visibility: h.visibility?.[i],
+        windKmh: kmh(h.wind_speed_10m?.[i] ?? 0),
+        gustKmh: kmh(h.wind_gusts_10m?.[i] ?? 0),
+        windDir: h.wind_direction_10m?.[i],
+        uv: h.uv_index?.[i],
+        isDay: h.is_day?.[i] === 1,
+        radiation: h.shortwave_radiation?.[i],
+        heatIndexC: heatIndexC(tempC, rh),
+        wbgtC: wbgtEstimateC(tempC, rh, h.shortwave_radiation?.[i], h.wind_speed_10m?.[i])
+      };
+    }).filter((r) => typeof r.temp === 'number');
+
+    const days = (d.time || []).map((t, i) => ({
+      date: t,
+      dt: omTime(t + 'T12:00', tz),
+      max: d.temperature_2m_max?.[i],
+      min: d.temperature_2m_min?.[i],
+      mean: d.temperature_2m_mean?.[i],
+      precip: d.precipitation_sum?.[i] ?? 0,
+      precipHours: d.precipitation_hours?.[i] ?? 0,
+      windMax: kmh(d.wind_speed_10m_max?.[i] ?? 0),
+      gustMax: kmh(d.wind_gusts_10m_max?.[i] ?? 0),
+      windDir: d.wind_direction_10m_dominant?.[i],
+      uvMax: d.uv_index_max?.[i],
+      radiation: d.shortwave_radiation_sum?.[i],
+      past: omTime(t + 'T12:00', tz) <= nowSec
+    }));
+
+    return { hours, days, tz, units, generatedAt: Date.now() };
+  }
+};
+
+/* ── Meteorological formulae ──────────────────────────────────────────────── */
+
+/**
+ * NOAA/Rothfusz heat index, in °C.
+ *
+ * The regression is defined in Fahrenheit, so the conversion happens inside.
+ * Below 80 °F it is not valid and Steadman's simpler form is used instead —
+ * without that guard the polynomial reports absurd values on a mild morning.
+ */
+function heatIndexC(tempC, rh) {
+  if (typeof tempC !== 'number' || typeof rh !== 'number') return null;
+  const T = tempC * 9 / 5 + 32;
+  const R = clamp(rh, 0, 100);
+
+  let hi = 0.5 * (T + 61 + ((T - 68) * 1.2) + (R * 0.094));
+  if ((hi + T) / 2 >= 80) {
+    hi = -42.379 + 2.04901523 * T + 10.14333127 * R
+       - 0.22475541 * T * R - 0.00683783 * T * T
+       - 0.05481717 * R * R + 0.00122874 * T * T * R
+       + 0.00085282 * T * R * R - 0.00000199 * T * T * R * R;
+    // The two documented corrections at the extremes of the valid range.
+    if (R < 13 && T >= 80 && T <= 112) hi -= ((13 - R) / 4) * Math.sqrt((17 - Math.abs(T - 95)) / 17);
+    else if (R > 85 && T >= 80 && T <= 87) hi += ((R - 85) / 10) * ((87 - T) / 5);
+  }
+  return (hi - 32) * 5 / 9;
+}
+
+/**
+ * Wet Bulb Globe Temperature, estimated.
+ *
+ * WBGT is the standard for occupational heat stress and matters far more than
+ * air temperature in a humid climate — Malaysian outdoor work is governed by
+ * it. A true reading needs a black-globe thermometer, so this uses the
+ * Australian BoM approximation for the shaded natural wet bulb, nudged for
+ * solar load and wind. It is an estimate and the UI says so.
+ */
+function wbgtEstimateC(tempC, rh, radiation, windMs) {
+  if (typeof tempC !== 'number' || typeof rh !== 'number') return null;
+  // Vapour pressure (hPa) from temperature and relative humidity.
+  const e = (rh / 100) * 6.105 * Math.exp((17.27 * tempC) / (237.7 + tempC));
+  let wbgt = 0.567 * tempC + 0.393 * e + 3.94;
+  // Direct sun raises the globe temperature; wind ventilates it.
+  if (typeof radiation === 'number' && radiation > 0) {
+    wbgt += Math.min(3, (radiation / 1000) * 3);
+    if (typeof windMs === 'number') wbgt -= Math.min(1.5, windMs * 0.25);
+  }
+  return wbgt;
+}
+
+/** Descriptive statistics for one numeric series. */
+function describe(values) {
+  const v = values.filter((x) => typeof x === 'number' && !Number.isNaN(x));
+  if (!v.length) return null;
+  const sorted = [...v].sort((a, b) => a - b);
+  const mean = v.reduce((a, b) => a + b, 0) / v.length;
+  const variance = v.reduce((a, b) => a + (b - mean) ** 2, 0) / v.length;
+  return {
+    n: v.length,
+    mean,
+    median: percentile(v, 0.5),
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+    sd: Math.sqrt(variance),
+    p10: percentile(v, 0.1),
+    p90: percentile(v, 0.9),
+    range: sorted[sorted.length - 1] - sorted[0]
+  };
+}
+
+/** Least-squares slope of y against index, returned per day. */
+function trendPerDay(values, hoursPerStep = 1) {
+  const pts = values.map((y, i) => [i, y]).filter(([, y]) => typeof y === 'number');
+  if (pts.length < 4) return null;
+  const n = pts.length;
+  const sx = pts.reduce((a, [x]) => a + x, 0);
+  const sy = pts.reduce((a, [, y]) => a + y, 0);
+  const sxy = pts.reduce((a, [x, y]) => a + x * y, 0);
+  const sxx = pts.reduce((a, [x]) => a + x * x, 0);
+  const denom = n * sxx - sx * sx;
+  if (!denom) return null;
+  const slopePerStep = (n * sxy - sx * sy) / denom;
+  return slopePerStep * (24 / hoursPerStep);
+}
+
+/** Pearson correlation between two aligned series. */
+function correlation(a, b) {
+  const pairs = a.map((x, i) => [x, b[i]])
+    .filter(([x, y]) => typeof x === 'number' && typeof y === 'number');
+  if (pairs.length < 6) return null;
+  const n = pairs.length;
+  const ma = pairs.reduce((s, [x]) => s + x, 0) / n;
+  const mb = pairs.reduce((s, [, y]) => s + y, 0) / n;
+  let num = 0, da = 0, db = 0;
+  for (const [x, y] of pairs) {
+    num += (x - ma) * (y - mb);
+    da += (x - ma) ** 2;
+    db += (y - mb) ** 2;
+  }
+  const den = Math.sqrt(da * db);
+  return den ? num / den : null;
+}
+
+/** Mean of a variable bucketed by hour of local day. */
+function diurnal(hours, field) {
+  const buckets = Array.from({ length: 24 }, () => []);
+  for (const r of hours) {
+    const v = r[field];
+    if (typeof v === 'number') buckets[r.localHour].push(v);
+  }
+  return buckets.map((b, hour) => ({
+    hour,
+    mean: b.length ? b.reduce((a, x) => a + x, 0) / b.length : null,
+    n: b.length
+  }));
+}
+
+/**
+ * Wind rose: 16 compass sectors × four Beaufort-ish speed bins.
+ * Returns counts as a fraction of all observations, so sectors are comparable
+ * regardless of how many hours are in the record set.
+ */
+const ROSE_BINS = [
+  { label: '< 5 km/h', max: 5 },
+  { label: '5–15', max: 15 },
+  { label: '15–25', max: 25 },
+  { label: '25+', max: Infinity }
+];
+
+function windRose(hours) {
+  const sectors = Array.from({ length: 16 }, () => ROSE_BINS.map(() => 0));
+  let calm = 0, total = 0;
+
+  for (const r of hours) {
+    if (typeof r.windDir !== 'number' || typeof r.windKmh !== 'number') continue;
+    total += 1;
+    if (r.windKmh < 1) { calm += 1; continue; }
+    const sector = Math.round(r.windDir / 22.5) % 16;
+    const bin = ROSE_BINS.findIndex((b) => r.windKmh < b.max);
+    sectors[sector][bin === -1 ? ROSE_BINS.length - 1 : bin] += 1;
+  }
+
+  const max = Math.max(...sectors.map((s) => s.reduce((a, b) => a + b, 0)), 1);
+  const dominant = sectors
+    .map((s, i) => ({ i, n: s.reduce((a, b) => a + b, 0) }))
+    .sort((a, b) => b.n - a.n)[0];
+
+  return {
+    sectors, total, calm, max,
+    calmPct: total ? (calm / total) * 100 : 0,
+    dominantSector: dominant?.i ?? 0,
+    dominantPct: total ? (dominant.n / total) * 100 : 0
+  };
+}
+
+const COMPASS_16 = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+
+/** Longest run of consecutive days satisfying a predicate. */
+function longestRun(items, predicate) {
+  let best = 0, run = 0;
+  for (const item of items) {
+    if (predicate(item)) { run += 1; best = Math.max(best, run); }
+    else run = 0;
+  }
+  return best;
+}
+
+/**
+ * Three-hour pressure tendency, the classic short-range storm signal.
+ * A fall of 3 hPa or more in three hours is the traditional threshold.
+ */
+function pressureTendency(hours) {
+  const withP = hours.filter((r) => typeof r.pressure === 'number');
+  if (withP.length < 4) return null;
+  const nowIndex = withP.findIndex((r) => !r.past);
+  const i = nowIndex > 3 ? nowIndex : withP.length - 1;
+  const change = withP[i].pressure - withP[Math.max(0, i - 3)].pressure;
+  return {
+    change,
+    label: change <= -3 ? 'Falling rapidly' : change <= -1 ? 'Falling'
+         : change >= 3 ? 'Rising rapidly' : change >= 1 ? 'Rising' : 'Steady',
+    meaning: change <= -3
+      ? 'A fall of 3 hPa or more in three hours is the classic signal of an approaching storm or squall line.'
+      : change <= -1 ? 'Slowly falling pressure often precedes cloud and showers.'
+      : change >= 3 ? 'Rapidly rising pressure usually follows a system clearing through.'
+      : change >= 1 ? 'Rising pressure generally means settling, drier conditions.'
+      : 'Pressure is steady, so no rapid change of air mass is indicated.'
+  };
+}
+
+/** Hours spent in each heat-stress band, on the WBGT scale. */
+const HEAT_BANDS = [
+  { max: 25,       label: 'Low',       tone: 'ok',     advice: 'Normal activity.' },
+  { max: 28,       label: 'Moderate',  tone: 'info',   advice: 'Take breaks and drink regularly during sustained effort.' },
+  { max: 30,       label: 'High',      tone: 'warn',   advice: 'Limit strenuous outdoor work; rest 15 minutes each hour.' },
+  { max: 32,       label: 'Very high', tone: 'bad',    advice: 'Curtail heavy work; rest 30 minutes each hour, in shade.' },
+  { max: Infinity, label: 'Extreme',   tone: 'severe', advice: 'Suspend strenuous outdoor work.' }
+];
+
+function heatStressProfile(hours) {
+  const counts = HEAT_BANDS.map(() => 0);
+  let daylightPeak = null;
+  for (const r of hours) {
+    if (typeof r.wbgtC !== 'number') continue;
+    const i = HEAT_BANDS.findIndex((b) => r.wbgtC < b.max);
+    counts[i === -1 ? HEAT_BANDS.length - 1 : i] += 1;
+    if (r.isDay && (!daylightPeak || r.wbgtC > daylightPeak.wbgtC)) daylightPeak = r;
+  }
+  return { counts, daylightPeak, total: counts.reduce((a, b) => a + b, 0) };
+}
+
+/** Rainfall structure: totals, intensity, and how the wet hours cluster. */
+function rainfallProfile(data) {
+  const wetHours = data.hours.filter((r) => r.precip > 0.1);
+  const intensities = wetHours.map((r) => r.precip);
+  const total = data.hours.reduce((a, r) => a + (r.precip || 0), 0);
+  const dryDays = data.days.filter((d) => d.precip < 1).length;
+
+  return {
+    total,
+    wetHours: wetHours.length,
+    totalHours: data.hours.length,
+    wetFraction: data.hours.length ? wetHours.length / data.hours.length : 0,
+    peakHourly: intensities.length ? Math.max(...intensities) : 0,
+    meanIntensity: intensities.length ? intensities.reduce((a, b) => a + b, 0) / intensities.length : 0,
+    dryDays,
+    longestDrySpell: longestRun(data.days, (d) => d.precip < 1),
+    longestWetSpell: longestRun(data.days, (d) => d.precip >= 1),
+    wettestDay: data.days.reduce((m, d) => (d.precip > (m?.precip ?? -1) ? d : m), null),
+    // When during the day does rain actually fall? The answer is the single
+    // most useful planning fact in a tropical climate.
+    byHour: diurnal(data.hours, 'precip')
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 32 · ANALYSIS CHARTS
+ * ---------------------------------------------------------------------------
+ * Canvas, no library. Three rules govern everything below:
+ *
+ *   One axis per chart. Two measures on different scales get two charts, never
+ *   a second y-axis — a dual axis lets the author choose where the lines cross
+ *   and so implies a relationship that may not exist.
+ *
+ *   Categorical colour comes from a fixed, validated order. The three series
+ *   hues were checked for colour-vision separation and contrast against both
+ *   surfaces; they are never cycled or reassigned by rank.
+ *
+ *   Identity is never colour alone. Every multi-series chart carries a legend
+ *   and direct labels, and every figure has a table view beneath it.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Validated categorical slots, read from CSS so the palette has one home and
+ * follows the theme automatically. Index is identity — slot 1 is always the
+ * primary measure — and hues are never cycled for a series beyond the third.
+ */
+function vizSeries(i) {
+  return themeColor(`--viz-${(i % 3) + 1}`, ['#3987e5', '#d95926', '#199e70'][i % 3]);
+}
+
+/** Single-hue sequential ramp, light to dark, for magnitude. */
+function vizRamp(t) {
+  const dark = document.documentElement.getAttribute('data-theme') !== 'light';
+  const stops = dark
+    ? ['#1b3b63', '#215c9c', '#2a78d6', '#3987e5', '#7cc6ff']
+    : ['#cfe3fa', '#8fbdf0', '#4a92e0', '#2a78d6', '#17518f'];
+  const i = clamp(Math.floor(t * (stops.length - 1)), 0, stops.length - 2);
+  return stops[Math.min(stops.length - 1, i + (t > 0.999 ? 1 : 0))] || stops[i];
+}
+
+const vizInk = {
+  primary: () => themeColor('--text', '#e8eeff'),
+  secondary: () => themeColor('--text-mut', '#9aa8c7'),
+  muted: () => themeColor('--text-dim', '#6b7899'),
+  grid: () => themeColor('--border', 'rgba(255,255,255,.1)'),
+  surface: () => themeColor('--bg-raise', '#0d1426')
+};
+
+/** Registry so charts can be redrawn on resize and theme change. */
+const wxCharts = new Map();
+function registerChart(id, draw) { wxCharts.set(id, draw); draw(); }
+function redrawCharts() { for (const draw of wxCharts.values()) { try { draw(); } catch { /* noop */ } } }
+
+/**
+ * Attach a crosshair and tooltip to a time-series canvas.
+ *
+ * An HTML chart is interactive by default; a static plot of 336 points that
+ * cannot be interrogated is a picture, not an instrument.
+ */
+function attachHover(canvas, getPoints, formatRow) {
+  const wrap = canvas.parentElement;
+  let tip = wrap.querySelector('.viz-tip');
+  if (!tip) {
+    tip = el('div', { className: 'viz-tip' });
+    tip.hidden = true;
+    wrap.appendChild(tip);
+  }
+
+  const onMove = (e) => {
+    const pts = getPoints();
+    if (!pts?.length) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    // Nearest point by x, so the hit target is the whole column, not the mark.
+    let best = 0, bestD = Infinity;
+    for (let i = 0; i < pts.length; i += 1) {
+      const d = Math.abs(pts[i].x - x);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    const p = pts[best];
+    tip.replaceChildren(...formatRow(p.datum, best));
+    tip.hidden = false;
+    const w = tip.offsetWidth || 160;
+    tip.style.setProperty('left', `${clamp(p.x - w / 2, 4, rect.width - w - 4)}px`);
+    tip.style.setProperty('top', '8px');
+    canvas.dataset.hoverIndex = String(best);
+    const draw = wxCharts.get(canvas.id);
+    if (draw) draw();
+  };
+
+  canvas.addEventListener('pointermove', onMove);
+  canvas.addEventListener('pointerleave', () => {
+    tip.hidden = true;
+    delete canvas.dataset.hoverIndex;
+    const draw = wxCharts.get(canvas.id);
+    if (draw) draw();
+  });
+}
+
+/** Shared frame: padding, scales, recessive grid, axis labels. */
+function plotFrame(ctx, w, h, { lo, hi, padL = 46, padR = 16, padT = 18, padB = 30, ticks = 4, fmt = (v) => Math.round(v) }) {
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  const span = (hi - lo) || 1;
+  const y = (v) => padT + plotH - ((v - lo) / span) * plotH;
+
+  ctx.strokeStyle = vizInk.grid();
+  ctx.fillStyle = vizInk.muted();
+  ctx.lineWidth = 1;
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+
+  for (let i = 0; i <= ticks; i += 1) {
+    const v = lo + (span / ticks) * i;
+    const gy = Math.round(y(v)) + 0.5;
+    ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(w - padR, gy); ctx.stroke();
+    ctx.fillText(fmt(v), padL - 8, gy);
+  }
+  return { padL, padR, padT, padB, plotW, plotH, y };
+}
+
+/* ── Multi-series time series ─────────────────────────────────────────────── */
+
+function drawTimeSeries(canvasId, { rows, series, unit, fmt = (v) => Math.round(v) }) {
+  const canvas = $('#' + canvasId);
+  if (!canvas || canvas.offsetParent === null) return;
+  const { ctx, w, h } = setupCanvas(canvas);
+  if (!rows.length) return;
+
+  const all = series.flatMap((s) => rows.map((r) => r[s.field])).filter((v) => typeof v === 'number');
+  if (!all.length) return;
+  let lo = Math.min(...all), hi = Math.max(...all);
+  const pad = (hi - lo) * 0.12 || 1;
+  lo -= pad; hi += pad;
+
+  const F = plotFrame(ctx, w, h, { lo, hi, fmt });
+  const x = (i) => F.padL + (rows.length === 1 ? F.plotW / 2 : (i / (rows.length - 1)) * F.plotW);
+
+  // Night shading, so the diurnal rhythm is legible without reading the axis.
+  ctx.fillStyle = hexToRgba(vizInk.muted(), 0.10);
+  let runStart = null;
+  rows.forEach((r, i) => {
+    if (!r.isDay && runStart === null) runStart = i;
+    if ((r.isDay || i === rows.length - 1) && runStart !== null) {
+      ctx.fillRect(x(runStart), F.padT, Math.max(1, x(i) - x(runStart)), F.plotH);
+      runStart = null;
+    }
+  });
+
+  // "Now" divider between observed and forecast.
+  const nowIndex = rows.findIndex((r) => !r.past);
+  if (nowIndex > 0) {
+    ctx.strokeStyle = vizInk.secondary();
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(Math.round(x(nowIndex)) + 0.5, F.padT);
+    ctx.lineTo(Math.round(x(nowIndex)) + 0.5, F.padT + F.plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = vizInk.muted();
+    ctx.font = '10px system-ui, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('forecast →', x(nowIndex) + 5, F.padT + 8);
+    ctx.textAlign = 'right';
+    ctx.fillText('← observed', x(nowIndex) - 5, F.padT + 8);
+  }
+
+  series.forEach((s, si) => {
+    ctx.beginPath();
+    let started = false;
+    rows.forEach((r, i) => {
+      const v = r[s.field];
+      if (typeof v !== 'number') return;
+      const px = x(i), py = F.y(v);
+      if (!started) { ctx.moveTo(px, py); started = true; } else ctx.lineTo(px, py);
+    });
+    ctx.strokeStyle = vizSeries(si);
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // Direct label at the series end — identity without reading the legend.
+    const last = [...rows].reverse().find((r) => typeof r[s.field] === 'number');
+    if (last) {
+      ctx.fillStyle = vizSeries(si);
+      ctx.font = '600 11px system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(s.label, w - F.padR - 2, F.y(last[s.field]) - 7);
+    }
+  });
+
+  // Hover crosshair
+  const hoverIndex = canvas.dataset.hoverIndex ? Number(canvas.dataset.hoverIndex) : null;
+  if (hoverIndex !== null && rows[hoverIndex]) {
+    const hx = Math.round(x(hoverIndex)) + 0.5;
+    ctx.strokeStyle = vizInk.secondary();
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(hx, F.padT); ctx.lineTo(hx, F.padT + F.plotH); ctx.stroke();
+    series.forEach((s, si) => {
+      const v = rows[hoverIndex][s.field];
+      if (typeof v !== 'number') return;
+      ctx.beginPath();
+      ctx.arc(hx, F.y(v), 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = vizSeries(si);
+      ctx.fill();
+      // A surface ring keeps overlapping marks distinguishable.
+      ctx.strokeStyle = vizInk.surface();
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
+  }
+
+  // Day boundaries along the x axis
+  ctx.fillStyle = vizInk.muted();
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  let lastDay = null;
+  rows.forEach((r, i) => {
+    if (r.localDay === lastDay) return;
+    lastDay = r.localDay;
+    if (i === 0) return;
+    ctx.fillText(fmt.dayLabel ? fmt.dayLabel(r) : fmt2Day(r), x(i), h - 18);
+  });
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = vizInk.muted();
+  ctx.fillText(unit, F.padL, 2);
+
+  attachHover(canvas,
+    () => rows.map((r, i) => ({ x: x(i), datum: r })),
+    (r) => [
+      el('strong', { textContent: fmt.dayLabel ? fmt.dayLabel(r) : fmt2Day(r) + ' ' + fmt.clock2(r) }),
+      ...series.map((s, si) => {
+        const row = el('span', { className: 'viz-tip__row' });
+        const dot = el('i', { className: 'viz-tip__dot' });
+        dot.style.setProperty('background', vizSeries(si));
+        row.appendChild(dot);
+        row.appendChild(document.createTextNode(
+          `${s.label}: ${typeof r[s.field] === 'number' ? fmt(r[s.field]) + unit : '—'}`));
+        return row;
+      })
+    ]);
+}
+
+const fmt2Day = (r) => fmt.dayName(r.dt, r.tz) + ' ' + fmt.dayDate(r.dt, r.tz).split(' ')[0];
+fmt.clock2 = (r) => fmt.clock(r.dt, r.tz);
+
+/* ── Single-series bars ───────────────────────────────────────────────────── */
+
+function drawBars(canvasId, { items, valueOf, labelOf, unit, colorOf, fmt = (v) => round(v, 1) }) {
+  const canvas = $('#' + canvasId);
+  if (!canvas || canvas.offsetParent === null) return;
+  const { ctx, w, h } = setupCanvas(canvas);
+  if (!items.length) return;
+
+  const values = items.map(valueOf);
+  const hi = Math.max(...values, 0.001) * 1.15;
+  const F = plotFrame(ctx, w, h, { lo: 0, hi, ticks: 3, fmt });
+  const slot = F.plotW / items.length;
+  // A 2px gap between adjacent fills keeps them from reading as one mass.
+  const barW = Math.max(2, slot - 2);
+
+  items.forEach((item, i) => {
+    const v = valueOf(item);
+    const bx = F.padL + i * slot + 1;
+    const by = F.y(v);
+    const bh = Math.max(v > 0 ? 2 : 0, F.padT + F.plotH - by);
+    if (!bh) return;
+    ctx.fillStyle = colorOf ? colorOf(item, i) : vizSeries(0);
+    // 4px rounded ends, anchored to the baseline.
+    roundedTopRect(ctx, bx, by, barW, bh, Math.min(4, barW / 2));
+    ctx.fill();
+  });
+
+  ctx.fillStyle = vizInk.muted();
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const step = Math.ceil(items.length / 12);
+  items.forEach((item, i) => {
+    if (i % step) return;
+    ctx.fillText(labelOf(item, i), F.padL + i * slot + slot / 2, h - 18);
+  });
+  ctx.textAlign = 'left';
+  ctx.fillText(unit, F.padL, 2);
+
+  attachHover(canvas,
+    () => items.map((item, i) => ({ x: F.padL + i * slot + slot / 2, datum: item })),
+    (item, i) => [
+      el('strong', { textContent: labelOf(item, i) }),
+      el('span', { className: 'viz-tip__row', textContent: `${fmt(valueOf(item))}${unit}` })
+    ]);
+}
+
+function roundedTopRect(ctx, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h);
+  ctx.beginPath();
+  ctx.moveTo(x, y + h);
+  ctx.lineTo(x, y + rad);
+  ctx.quadraticCurveTo(x, y, x + rad, y);
+  ctx.lineTo(x + w - rad, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + rad);
+  ctx.lineTo(x + w, y + h);
+  ctx.closePath();
+}
+
+/* ── Wind rose ────────────────────────────────────────────────────────────── */
+
+/**
+ * Sixteen sectors, four speed bins, drawn as stacked polar segments. Speed is
+ * a magnitude, so the bins step along one hue from light to dark rather than
+ * taking four unrelated colours.
+ */
+function drawWindRose(canvasId, rose) {
+  const canvas = $('#' + canvasId);
+  if (!canvas || canvas.offsetParent === null) return;
+  const { ctx, w, h } = setupCanvas(canvas);
+  if (!rose.total) return;
+
+  const cx = w / 2, cy = h / 2 + 6;
+  const radius = Math.min(w, h) / 2 - 26;
+
+  // Range rings, recessive.
+  ctx.strokeStyle = vizInk.grid();
+  ctx.lineWidth = 1;
+  for (let i = 1; i <= 3; i += 1) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, (radius / 3) * i, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  const sectorAngle = (Math.PI * 2) / 16;
+  rose.sectors.forEach((bins, s) => {
+    // −90° puts north at the top; half a sector centres the wedge on the bearing.
+    const start = s * sectorAngle - Math.PI / 2 - sectorAngle / 2;
+    const end = start + sectorAngle * 0.86;   // gap between adjacent wedges
+    let inner = 0;
+    bins.forEach((count, b) => {
+      if (!count) return;
+      const outer = inner + (count / rose.max) * radius;
+      ctx.beginPath();
+      ctx.arc(cx, cy, outer, start, end);
+      ctx.arc(cx, cy, inner, end, start, true);
+      ctx.closePath();
+      ctx.fillStyle = vizRamp(b / (ROSE_BINS.length - 1));
+      ctx.fill();
+      inner = outer;
+    });
+  });
+
+  ctx.fillStyle = vizInk.secondary();
+  ctx.font = '600 11px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ['N', 'E', 'S', 'W'].forEach((label, i) => {
+    const a = (i * Math.PI) / 2 - Math.PI / 2;
+    ctx.fillText(label, cx + Math.cos(a) * (radius + 14), cy + Math.sin(a) * (radius + 14));
+  });
+}
+
+/* ── Diurnal profile ──────────────────────────────────────────────────────── */
+
+function drawDiurnal(canvasId, buckets, { unit, fmt = (v) => round(v, 1), asBars = false }) {
+  const canvas = $('#' + canvasId);
+  if (!canvas || canvas.offsetParent === null) return;
+  const { ctx, w, h } = setupCanvas(canvas);
+  const values = buckets.map((b) => b.mean).filter((v) => typeof v === 'number');
+  if (!values.length) return;
+
+  let lo = asBars ? 0 : Math.min(...values);
+  let hi = Math.max(...values);
+  if (!asBars) { const p = (hi - lo) * 0.15 || 1; lo -= p; hi += p; } else hi *= 1.15;
+
+  const F = plotFrame(ctx, w, h, { lo, hi, ticks: 3, fmt });
+  const slot = F.plotW / 24;
+
+  if (asBars) {
+    buckets.forEach((b, i) => {
+      if (typeof b.mean !== 'number') return;
+      const by = F.y(b.mean);
+      const bh = Math.max(b.mean > 0 ? 2 : 0, F.padT + F.plotH - by);
+      ctx.fillStyle = vizSeries(0);
+      roundedTopRect(ctx, F.padL + i * slot + 1, by, Math.max(2, slot - 2), bh, 3);
+      ctx.fill();
+    });
+  } else {
+    ctx.beginPath();
+    buckets.forEach((b, i) => {
+      if (typeof b.mean !== 'number') return;
+      const px = F.padL + i * slot + slot / 2;
+      const py = F.y(b.mean);
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    });
+    ctx.strokeStyle = vizSeries(0);
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Mark the extremes only — a number on every point is noise.
+    const maxB = buckets.reduce((m, b) => (b.mean > (m?.mean ?? -Infinity) ? b : m), null);
+    const minB = buckets.reduce((m, b) => (b.mean < (m?.mean ?? Infinity) ? b : m), null);
+    for (const [b, tag] of [[maxB, 'peak'], [minB, 'low']]) {
+      if (!b || typeof b.mean !== 'number') continue;
+      const px = F.padL + b.hour * slot + slot / 2;
+      ctx.beginPath(); ctx.arc(px, F.y(b.mean), 4, 0, Math.PI * 2);
+      ctx.fillStyle = vizSeries(0); ctx.fill();
+      ctx.strokeStyle = vizInk.surface(); ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = vizInk.secondary();
+      ctx.font = '600 10px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${tag} ${fmt(b.mean)}${unit}`, px, F.y(b.mean) - 12);
+    }
+  }
+
+  ctx.fillStyle = vizInk.muted();
+  ctx.font = '10px system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let hr = 0; hr < 24; hr += 3) {
+    ctx.fillText(String(hr).padStart(2, '0'), F.padL + hr * slot + slot / 2, h - 18);
+  }
+  ctx.textAlign = 'left';
+  ctx.fillText(unit, F.padL, 2);
+
+  attachHover(canvas,
+    () => buckets.map((b, i) => ({ x: F.padL + i * slot + slot / 2, datum: b })),
+    (b) => [
+      el('strong', { textContent: `${String(b.hour).padStart(2, '0')}:00` }),
+      el('span', { className: 'viz-tip__row',
+                   textContent: typeof b.mean === 'number' ? `${fmt(b.mean)}${unit} (mean of ${b.n})` : 'no data' })
+    ]);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * 33 · WEATHER ANALYSIS VIEW
+ * ---------------------------------------------------------------------------
+ * Every figure is followed by the numbers behind it, so the page is readable
+ * without interpreting a colour, and by a screen reader.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+let wxState = null;
+
+async function renderAnalysis({ force = false } = {}) {
+  if (!state.place) return;
+  const status = $('#wx-status');
+  const body = $('#wx-body');
+
+  if (wxState && !force && wxState.placeKey === placeId(state.place) && wxState.units === state.units) {
+    body.hidden = false;
+    redrawCharts();
+    return;
+  }
+
+  status.hidden = false;
+  status.textContent = `Analysing 14 days of hourly observations for ${state.place.name}…`;
+  body.hidden = true;
+
+  try {
+    const data = await WxData.load(state.place, state.units);
+    wxState = { ...data, placeKey: placeId(state.place), units: state.units };
+    status.hidden = true;
+    body.hidden = false;
+    paintAnalysis(wxState);
+  } catch (err) {
+    status.textContent = `Could not load the analysis record set: ${err.message}`;
+    Telemetry.record('analysis', { lvl: 'error', msg: err.message });
+  }
+}
+
+function paintAnalysis(data) {
+  const U = data.units === 'imperial' ? '°F' : '°C';
+  const hours = data.hours;
+
+  /* ── Header ──────────────────────────────────────────────────────────── */
+  const first = hours[0], last = hours[hours.length - 1];
+  $('#wx-scope').textContent =
+    `${state.place.name} · ${hours.length} hourly observations · ` +
+    `${fmt.dayDate(first.dt, data.tz)} to ${fmt.dayDate(last.dt, data.tz)} · ` +
+    `${hours.filter((r) => r.past).length} observed, ${hours.filter((r) => !r.past).length} forecast`;
+
+  /* ── Temperature ─────────────────────────────────────────────────────── */
+  const tStats = describe(hours.map((r) => r.temp));
+  const fStats = describe(hours.map((r) => r.feels));
+  const dStats = describe(hours.map((r) => r.dew));
+  const slope = trendPerDay(hours.map((r) => r.temp));
+
+  registerChart('wx-temp', () => drawTimeSeries('wx-temp', {
+    rows: hours,
+    series: [
+      { field: 'temp',  label: 'Air' },
+      { field: 'feels', label: 'Feels like' },
+      { field: 'dew',   label: 'Dew point' }
+    ],
+    unit: U
+  }));
+
+  statTable('#wx-temp-table',
+    ['Series', 'Mean', 'Median', 'Min', 'Max', 'Std dev', 'P10', 'P90'],
+    [['Air temperature', tStats], ['Apparent temperature', fStats], ['Dew point', dStats]]
+      .filter(([, s]) => s)
+      .map(([label, s]) => [label, ...[s.mean, s.median, s.min, s.max, s.sd, s.p10, s.p90]
+        .map((v) => round(v, 1) + U)]));
+
+  $('#wx-temp-insight').textContent = tStats
+    ? `Air temperature averages ${round(tStats.mean, 1)}${U} across the period and spans ` +
+      `${round(tStats.range, 1)} degrees, with a standard deviation of ${round(tStats.sd, 1)}. ` +
+      (slope !== null
+        ? `The least-squares trend over the fortnight is ${slope >= 0 ? '+' : ''}${round(slope, 2)}${U} per day, ` +
+          `so the period is ${Math.abs(slope) < 0.05 ? 'essentially flat' : slope > 0 ? 'warming' : 'cooling'}. `
+        : '') +
+      (fStats && tStats
+        ? `Apparent temperature runs ${round(fStats.mean - tStats.mean, 1)} degrees above the air reading on average — ` +
+          'the humidity penalty, and the number that actually governs how the day feels.'
+        : '')
+    : 'No temperature data available.';
+
+  /* ── Diurnal cycle ───────────────────────────────────────────────────── */
+  const dTemp = diurnal(hours, 'temp');
+  const dPop = diurnal(hours, 'pop');
+  registerChart('wx-diurnal-temp', () => drawDiurnal('wx-diurnal-temp', dTemp, { unit: U }));
+  registerChart('wx-diurnal-rain', () => drawDiurnal('wx-diurnal-rain', dPop, { unit: '%', asBars: true, fmt: (v) => Math.round(v) }));
+
+  const hottest = dTemp.reduce((m, b) => (b.mean > (m?.mean ?? -Infinity) ? b : m), null);
+  const coolest = dTemp.reduce((m, b) => (b.mean < (m?.mean ?? Infinity) ? b : m), null);
+  const wettest = dPop.reduce((m, b) => (b.mean > (m?.mean ?? -Infinity) ? b : m), null);
+  $('#wx-diurnal-insight').textContent =
+    `Averaged over ${Math.round(hours.length / 24)} days, the warmest hour is ` +
+    `${String(hottest.hour).padStart(2, '0')}:00 at ${round(hottest.mean, 1)}${U} and the coolest is ` +
+    `${String(coolest.hour).padStart(2, '0')}:00 at ${round(coolest.mean, 1)}${U} — a mean diurnal range of ` +
+    `${round(hottest.mean - coolest.mean, 1)} degrees. Rain is most likely around ` +
+    `${String(wettest.hour).padStart(2, '0')}:00 at ${Math.round(wettest.mean)}%, ` +
+    'which is the convective afternoon peak typical of the tropics.';
+
+  /* ── Rainfall ────────────────────────────────────────────────────────── */
+  const rain = rainfallProfile(data);
+  registerChart('wx-rain-daily', () => drawBars('wx-rain-daily', {
+    items: data.days,
+    valueOf: (d) => d.precip,
+    labelOf: (d) => fmt.dayName(d.dt, data.tz),
+    unit: ' mm'
+  }));
+
+  let running = 0;
+  const cumulative = data.days.map((d) => ({ ...d, cum: (running += d.precip) }));
+  registerChart('wx-rain-cum', () => drawBars('wx-rain-cum', {
+    items: cumulative,
+    valueOf: (d) => d.cum,
+    labelOf: (d) => fmt.dayName(d.dt, data.tz),
+    unit: ' mm'
+  }));
+
+  statTable('#wx-rain-table',
+    ['Measure', 'Value'],
+    [
+      ['Total over the period', `${round(rain.total, 1)} mm`],
+      ['Hours with measurable rain', `${rain.wetHours} of ${rain.totalHours} (${Math.round(rain.wetFraction * 100)}%)`],
+      ['Peak hourly intensity', `${round(rain.peakHourly, 1)} mm/h`],
+      ['Mean intensity while raining', `${round(rain.meanIntensity, 1)} mm/h`],
+      ['Dry days (under 1 mm)', `${rain.dryDays} of ${data.days.length}`],
+      ['Longest dry spell', `${rain.longestDrySpell} day${rain.longestDrySpell === 1 ? '' : 's'}`],
+      ['Longest wet spell', `${rain.longestWetSpell} day${rain.longestWetSpell === 1 ? '' : 's'}`],
+      ['Wettest day', rain.wettestDay ? `${fmt.dayName(rain.wettestDay.dt, data.tz)} — ${round(rain.wettestDay.precip, 1)} mm` : '—']
+    ]);
+
+  $('#wx-rain-insight').textContent =
+    `${round(rain.total, 1)} mm falls across the fortnight, but only ${Math.round(rain.wetFraction * 100)}% of hours ` +
+    `are actually wet — rain here arrives in short, intense bursts rather than drizzle. Peak intensity reaches ` +
+    `${round(rain.peakHourly, 1)} mm in a single hour` +
+    (rain.peakHourly >= 20 ? ', at or above MetMalaysia’s 20 mm/hour thunderstorm-warning threshold.' : '.');
+
+  /* ── Wind ────────────────────────────────────────────────────────────── */
+  const rose = windRose(hours);
+  registerChart('wx-rose', () => drawWindRose('wx-rose', rose));
+
+  const legend = $('#wx-rose-legend');
+  legend.replaceChildren();
+  ROSE_BINS.forEach((b, i) => {
+    const item = el('span', { className: 'viz-legend__item' });
+    const sw = el('i', { className: 'viz-legend__swatch' });
+    sw.style.setProperty('background', vizRamp(i / (ROSE_BINS.length - 1)));
+    item.appendChild(sw);
+    item.appendChild(document.createTextNode(b.label));
+    legend.appendChild(item);
+  });
+
+  const wStats = describe(hours.map((r) => r.windKmh));
+  const gStats = describe(hours.map((r) => r.gustKmh));
+  statTable('#wx-wind-table',
+    ['Measure', 'Value'],
+    [
+      ['Prevailing direction', `${COMPASS_16[rose.dominantSector]} (${Math.round(rose.dominantPct)}% of hours)`],
+      ['Mean speed', `${round(wStats?.mean ?? 0, 1)} km/h`],
+      ['Median speed', `${round(wStats?.median ?? 0, 1)} km/h`],
+      ['90th percentile', `${round(wStats?.p90 ?? 0, 1)} km/h`],
+      ['Peak gust', `${round(gStats?.max ?? 0, 1)} km/h`],
+      ['Calm hours (under 1 km/h)', `${rose.calm} (${Math.round(rose.calmPct)}%)`]
+    ]);
+
+  $('#wx-wind-insight').textContent =
+    `Wind comes from the ${COMPASS_16[rose.dominantSector]} in ${Math.round(rose.dominantPct)}% of hours, ` +
+    `averaging ${round(wStats?.mean ?? 0, 1)} km/h with a peak gust of ${round(gStats?.max ?? 0, 1)} km/h. ` +
+    'In Malaysia the prevailing direction is set by which monsoon is running, so a shift in this rose is a shift in season.';
+
+  /* ── Pressure ────────────────────────────────────────────────────────── */
+  const tend = pressureTendency(hours);
+  registerChart('wx-pressure', () => drawTimeSeries('wx-pressure', {
+    rows: hours,
+    series: [{ field: 'pressure', label: 'MSL pressure' }],
+    unit: ' hPa',
+    fmt: (v) => Math.round(v)
+  }));
+  const pStats = describe(hours.map((r) => r.pressure));
+  $('#wx-pressure-insight').textContent = tend
+    ? `${tend.label} — ${round(tend.change, 1)} hPa over three hours. ${tend.meaning} ` +
+      `Across the period pressure ranges ${round(pStats.min, 1)} to ${round(pStats.max, 1)} hPa ` +
+      `(mean ${round(pStats.mean, 1)}).`
+    : 'Not enough pressure data to compute a tendency.';
+
+  /* ── Heat stress ─────────────────────────────────────────────────────── */
+  const heat = heatStressProfile(hours);
+  const heatRows = HEAT_BANDS.map((b, i) => ({ band: b, hours: heat.counts[i] }));
+  registerChart('wx-heat', () => drawBars('wx-heat', {
+    items: heatRows,
+    valueOf: (r) => r.hours,
+    labelOf: (r) => r.band.label,
+    unit: ' h',
+    fmt: (v) => Math.round(v),
+    // Heat stress is a state, not a series, so it uses the reserved status
+    // colours — and every bar is labelled, never colour alone.
+    colorOf: (r) => themeColor(
+      r.band.tone === 'ok' ? '--c-good' : r.band.tone === 'info' ? '--c-brand-400'
+      : r.band.tone === 'warn' ? '--c-warn' : '--c-bad', '#888')
+  }));
+
+  statTable('#wx-heat-table',
+    ['WBGT band', 'Hours', 'Share', 'Guidance'],
+    heatRows.map((r) => [
+      r.band.label,
+      String(r.hours),
+      heat.total ? `${Math.round((r.hours / heat.total) * 100)}%` : '—',
+      r.band.advice
+    ]));
+
+  const hiStats = describe(hours.map((r) => r.heatIndexC));
+  $('#wx-heat-insight').textContent =
+    (heat.daylightPeak
+      ? `Peak daytime heat stress reaches an estimated WBGT of ${round(heat.daylightPeak.wbgtC, 1)} °C at ` +
+        `${fmt.clock(heat.daylightPeak.dt, data.tz)}. `
+      : '') +
+    (hiStats ? `The NOAA heat index peaks at ${round(hiStats.max, 1)} °C against an air maximum of ` +
+               `${round(describe(hours.map((r) => r.tempC)).max, 1)} °C — humidity adds roughly ` +
+               `${round(hiStats.max - describe(hours.map((r) => r.tempC)).max, 1)} degrees of felt heat. ` : '') +
+    'WBGT is estimated from temperature, humidity, solar radiation and wind rather than measured with a black-globe thermometer.';
+
+  /* ── Relationships ───────────────────────────────────────────────────── */
+  const pairs = [
+    ['Temperature ↔ relative humidity', correlation(hours.map((r) => r.temp), hours.map((r) => r.rh))],
+    ['Temperature ↔ cloud cover', correlation(hours.map((r) => r.temp), hours.map((r) => r.cloud))],
+    ['Cloud cover ↔ solar radiation', correlation(hours.map((r) => r.cloud), hours.map((r) => r.radiation))],
+    ['Humidity ↔ rain probability', correlation(hours.map((r) => r.rh), hours.map((r) => r.pop))],
+    ['Pressure ↔ rainfall', correlation(hours.map((r) => r.pressure), hours.map((r) => r.precip))],
+    ['Wind speed ↔ gust strength', correlation(hours.map((r) => r.windKmh), hours.map((r) => r.gustKmh))]
+  ].filter(([, r]) => r !== null);
+
+  statTable('#wx-corr-table',
+    ['Relationship', 'r', 'Strength', 'Direction'],
+    pairs.map(([label, r]) => [
+      label,
+      round(r, 2).toFixed(2),
+      Math.abs(r) >= 0.7 ? 'Strong' : Math.abs(r) >= 0.4 ? 'Moderate' : Math.abs(r) >= 0.2 ? 'Weak' : 'Negligible',
+      r > 0 ? 'Rises together' : 'Moves opposite'
+    ]));
+
+  const strongest = pairs.reduce((m, p) => (Math.abs(p[1]) > Math.abs(m?.[1] ?? 0) ? p : m), null);
+  $('#wx-corr-insight').textContent = strongest
+    ? `The strongest relationship in this record set is ${strongest[0].toLowerCase()} at r = ${round(strongest[1], 2)}. ` +
+      'Correlation across a fortnight of one location describes this period only; it is not a general law, and it is not causation.'
+    : 'Not enough overlapping data to compute correlations.';
+
+  /* ── Sun & cloud ─────────────────────────────────────────────────────── */
+  const cloudStats = describe(hours.map((r) => r.cloud));
+  const uvStats = describe(hours.filter((r) => r.isDay).map((r) => r.uv));
+  const visStats = describe(hours.map((r) => r.visibility));
+  const sunnyHours = hours.filter((r) => r.isDay && r.cloud < 30).length;
+  const dayHours = hours.filter((r) => r.isDay).length;
+
+  statTable('#wx-sky-table',
+    ['Measure', 'Value'],
+    [
+      ['Mean cloud cover', `${Math.round(cloudStats?.mean ?? 0)}%`],
+      ['Clear daylight hours (under 30% cloud)', `${sunnyHours} of ${dayHours} (${dayHours ? Math.round((sunnyHours / dayHours) * 100) : 0}%)`],
+      ['Peak UV index', round(uvStats?.max ?? 0, 1)],
+      ['Mean daytime UV', round(uvStats?.mean ?? 0, 1)],
+      ['Mean visibility', `${round((visStats?.mean ?? 0) / 1000, 1)} km`],
+      ['Lowest visibility', `${round((visStats?.min ?? 0) / 1000, 1)} km`]
+    ]);
+
+  $('#wx-sky-insight').textContent =
+    `Cloud averages ${Math.round(cloudStats?.mean ?? 0)}% and only ${dayHours ? Math.round((sunnyHours / dayHours) * 100) : 0}% ` +
+    `of daylight hours are genuinely clear. UV peaks at ${round(uvStats?.max ?? 0, 1)}` +
+    ((uvStats?.max ?? 0) >= 11 ? ', which is the extreme band — unprotected skin burns in minutes.'
+     : (uvStats?.max ?? 0) >= 8 ? ', which is the very-high band.' : '.') +
+    (visStats && visStats.min < 5000
+      ? ` Visibility drops to ${round(visStats.min / 1000, 1)} km at its worst, consistent with heavy rain or haze.`
+      : '');
+}
+
+/** Build an accessible table — the table view every figure is paired with. */
+function statTable(selector, headers, rows) {
+  const host = $(selector);
+  if (!host) return;
+  host.replaceChildren();
+
+  const table = el('table', { className: 'table table--stats' });
+  const thead = el('thead');
+  const hr = el('tr');
+  headers.forEach((h, i) => hr.appendChild(el('th', {
+    textContent: h, attrs: { scope: 'col', ...(i > 0 ? { class: 'num' } : {}) }
+  })));
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const tbody = el('tbody');
+  for (const row of rows) {
+    const tr = el('tr');
+    row.forEach((cell, i) => {
+      if (i === 0) tr.appendChild(el('th', { textContent: String(cell), attrs: { scope: 'row' } }));
+      else tr.appendChild(el('td', { textContent: String(cell), className: 'num' }));
+    });
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  host.appendChild(table);
+}
+
+/** The old app-performance telemetry, kept but demoted to a diagnostics panel. */
+function renderDiagnostics() {
+  const v = Telemetry.vitals;
+  const ms = Telemetry.latencies.map((l) => l.ms);
+  const rows = [
+    ['Largest Contentful Paint', v.lcp === null ? '—' : fmt.ms(v.lcp)],
+    ['Cumulative Layout Shift', round(v.cls, 3).toFixed(3)],
+    ['Interaction to Next Paint', v.inp === null ? '—' : fmt.ms(v.inp)],
+    ['Time to First Byte', v.ttfb === null ? '—' : fmt.ms(v.ttfb)],
+    ['API requests this session', String(Telemetry.counts.req)],
+    ['Median API latency', fmt.ms(percentile(ms, 0.5))],
+    ['95th percentile latency', fmt.ms(percentile(ms, 0.95))],
+    ['Cache hits / misses', `${Telemetry.counts.hit} / ${Telemetry.counts.miss}`],
+    ['Errors', String(Telemetry.counts.err)]
+  ];
+  statTable('#wx-diag-table', ['Metric', 'Value'], rows);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * 19 · VIEWS
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -4521,7 +5455,7 @@ function setView(name) {
     renderStateFilter();
     renderPlacesList();
   }
-  if (name === 'analytics') renderAnalytics();
+  if (name === 'analytics') { renderAnalysis(); renderDiagnostics(); }
   if (name === 'dashboard') renderHourly();
   if (name === 'alerts') { renderAlertsView(); renderFloodChart(); }
   if (name === 'climate') {
@@ -4568,9 +5502,16 @@ function renderAuthUI() {
 
   $('#auth-mode-note').textContent = Auth.mode === 'firebase'
     ? 'Signed in through Firebase Authentication. Your saved places sync to Cloud Firestore.'
-    : 'Running in local account mode: your credentials are hashed with PBKDF2-SHA256 and stored only in this browser. Add a Firebase config to config.js to enable Google sign-in and cross-device sync.';
+    : 'Running in local account mode: your credentials are hashed with PBKDF2-SHA256 and stored only in this browser. Google sign-in needs an identity provider — add a Firebase config in Settings to switch it on.';
 
-  $('#btn-google').disabled = Auth.mode !== 'firebase';
+  // Never disabled: a dead button teaches nothing. When Firebase is absent it
+  // says so and offers the one action that fixes it.
+  const gbtn = $('#btn-google');
+  gbtn.disabled = false;
+  gbtn.dataset.ready = String(Auth.mode === 'firebase');
+  $('#btn-google-label').textContent = Auth.mode === 'firebase'
+    ? 'Continue with Google'
+    : 'Set up Google sign-in';
 }
 
 function setAuthMode(mode) {
@@ -4659,6 +5600,9 @@ function friendlyAuthError(err) {
 
 function openSettings() {
   $('#set-apikey').value = safeLocal.get(LS.apiKey, '');
+  const fb = safeLocal.json(LS.firebase, null);
+  $('#set-firebase').value = fb ? JSON.stringify(fb, null, 2) : '';
+  $('#set-firebase-err').textContent = '';
   $('#set-units').value = state.units;
   $('#set-home').value = state.home;
   $('#set-analytics').checked = state.analytics !== false;
@@ -4674,6 +5618,30 @@ async function saveSettingsFromDialog() {
   const key = $('#set-apikey').value.trim();
   const hadKey = hasKey();
   const providerChanged = state.provider !== $('#set-provider').value;
+
+  // Validate the Firebase config before storing it, so a typo surfaces here
+  // rather than as a broken sign-in button later.
+  const fbRaw = $('#set-firebase').value.trim();
+  const hadFirebase = Boolean(Auth.config());
+  if (fbRaw) {
+    let parsed;
+    try {
+      // Accept the object literal Firebase shows in its console as well as JSON.
+      parsed = JSON.parse(fbRaw.replace(/([{,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":')
+                               .replace(/'/g, '"').replace(/,(\s*[}\]])/g, '$1'));
+    } catch {
+      $('#set-firebase-err').textContent = 'That is not valid JSON. Copy the whole config object from the Firebase console.';
+      return;
+    }
+    if (!parsed.apiKey || !parsed.authDomain || !parsed.projectId) {
+      $('#set-firebase-err').textContent = 'The config needs at least apiKey, authDomain and projectId.';
+      return;
+    }
+    safeLocal.set(LS.firebase, JSON.stringify(parsed));
+  } else {
+    safeLocal.del(LS.firebase);
+  }
+  const firebaseChanged = Boolean(fbRaw) !== hadFirebase;
 
   if (key) safeLocal.set(LS.apiKey, key); else safeLocal.del(LS.apiKey);
 
@@ -4692,6 +5660,14 @@ async function saveSettingsFromDialog() {
   applyMotion();
   $('#settings-dialog').close();
   toast('Settings saved.', 'success');
+
+  if (firebaseChanged) {
+    // Firebase initialises once at boot, so switching it on or off needs a
+    // reload rather than a live re-init of a half-built auth graph.
+    toast('Reloading to apply the sign-in change…', 'info');
+    setTimeout(() => location.reload(), 900);
+    return;
+  }
 
   if ((key && !hadKey) || providerChanged) {
     CachePolicy.clear();   // responses from the previous provider must not linger
@@ -4767,7 +5743,7 @@ function wireEvents() {
     applyTheme();
     // Charts bake theme colours into pixels, so they must be repainted.
     renderHourly();
-    if (activeView === 'analytics') renderAnalytics();
+    if (activeView === 'analytics') { redrawCharts(); renderDiagnostics(); }
     if (activeView === 'alerts') renderFloodChart();
     if (activeView === 'climate' && state.climate) renderClimateChart(state.climate.normals);
   });
@@ -4843,15 +5819,17 @@ function wireEvents() {
 
   /* ── Analytics ──────────────────────────────────────────────────────── */
   $('#btn-export').addEventListener('click', () => {
-    downloadJSON(`cuacamy-analytics-${new Date().toISOString().slice(0, 10)}.json`, Telemetry.snapshot());
-    toast('Analytics exported.', 'success');
+    downloadJSON(`cuacamy-diagnostics-${new Date().toISOString().slice(0, 10)}.json`, Telemetry.snapshot());
+    toast('Diagnostics exported.', 'success');
   });
 
   $('#btn-clear-analytics').addEventListener('click', () => {
     Telemetry.reset();
-    renderAnalytics();
-    toast('Analytics cleared.');
+    renderDiagnostics();
+    toast('Diagnostics cleared.');
   });
+
+  $('#btn-reanalyse').addEventListener('click', () => renderAnalysis({ force: true }));
 
   /* ── Auth dialog ────────────────────────────────────────────────────── */
   $('#auth-form').addEventListener('submit', handleAuthSubmit);
@@ -4873,6 +5851,13 @@ function wireEvents() {
       $('#auth-dialog').close();
       toast('Signed in with Google.', 'success');
     } catch (err) {
+      if (err.message === 'NEEDS_FIREBASE') {
+        $('#auth-dialog').close();
+        openSettings();
+        $('#set-firebase').focus();
+        toast('Paste a Firebase config here to turn on Google sign-in.', 'info', 7000);
+        return;
+      }
       $('#auth-msg').dataset.type = 'error';
       $('#auth-msg').textContent = friendlyAuthError(err);
     }
@@ -4931,7 +5916,7 @@ function wireEvents() {
   /* ── Resize: canvases are pixel-backed and must be redrawn ──────────── */
   window.addEventListener('resize', rafThrottle(() => {
     renderHourly();
-    if (activeView === 'analytics') { renderLatencyChart(); renderCacheDonut(); }
+    if (activeView === 'analytics') redrawCharts();
     if (activeView === 'alerts') renderFloodChart();
     if (activeView === 'climate' && state.climate) renderClimateChart(state.climate.normals);
   }));

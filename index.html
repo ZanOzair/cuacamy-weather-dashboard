@@ -245,7 +245,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pin"></use></svg> Explore Malaysia
       </button>
       <button class="tab" role="tab" id="tab-analytics" aria-controls="view-analytics" aria-selected="false" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chart"></use></svg> Analytics
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chart"></use></svg> Weather analysis
       </button>
     </div>
   </nav>
@@ -635,71 +635,131 @@
   </section>
 
   <!-- ════════════════════════════════════════════════════════════════════════
-       VIEW · ANALYTICS
+       VIEW · WEATHER ANALYSIS
        ════════════════════════════════════════════════════════════════════════ -->
   <section id="view-analytics" class="view" role="tabpanel" aria-labelledby="tab-analytics" tabindex="-1" hidden>
     <div class="view__head">
-      <h1>Performance &amp; usage analytics</h1>
-      <p>Everything below is measured live in your browser with the Performance APIs. Nothing is sent to a third-party tracker.</p>
+      <h1>Weather analysis</h1>
+      <p>A fortnight of hourly observations — seven days behind, seven ahead — put through the standard
+         meteorological treatments. Every figure is followed by the numbers behind it.</p>
     </div>
 
-    <div class="kpis" id="kpi-row">
-      <div class="kpi"><span class="kpi__label">Largest Contentful Paint</span><span class="kpi__value" id="kpi-lcp">—</span><span class="kpi__grade" id="kpi-lcp-g"></span></div>
-      <div class="kpi"><span class="kpi__label">Cumulative Layout Shift</span><span class="kpi__value" id="kpi-cls">—</span><span class="kpi__grade" id="kpi-cls-g"></span></div>
-      <div class="kpi"><span class="kpi__label">Interaction to Next Paint</span><span class="kpi__value" id="kpi-inp">—</span><span class="kpi__grade" id="kpi-inp-g"></span></div>
-      <div class="kpi"><span class="kpi__label">Time to First Byte</span><span class="kpi__value" id="kpi-ttfb">—</span><span class="kpi__grade" id="kpi-ttfb-g"></span></div>
+    <div class="analysis-tools">
+      <p class="card__hint" id="wx-scope"></p>
+      <button class="btn btn--sm" id="btn-reanalyse" type="button">Recompute</button>
     </div>
 
-    <div class="grid grid--analytics">
-      <article class="card" aria-labelledby="h-api">
-        <h2 class="card__title" id="h-api">API latency</h2>
-        <ul class="statlist">
-          <li><span>Requests this session</span><strong id="st-req">0</strong></li>
-          <li><span>Median (p50)</span><strong id="st-p50">—</strong></li>
-          <li><span>95th percentile (p95)</span><strong id="st-p95">—</strong></li>
-          <li><span>Slowest</span><strong id="st-max">—</strong></li>
-          <li><span>Errors</span><strong id="st-err">0</strong></li>
-        </ul>
-        <div class="chart-wrap chart-wrap--sm">
-          <canvas id="latency-chart" role="img" aria-label="API latency over time"></canvas>
+    <p class="climate-status" id="wx-status" hidden></p>
+
+    <div id="wx-body" hidden>
+
+      <article class="card" aria-labelledby="h-wx-temp">
+        <h2 class="card__title" id="h-wx-temp">Temperature, apparent temperature and dew point</h2>
+        <div class="viz-legend" aria-hidden="true">
+          <span class="viz-legend__item"><i class="viz-legend__swatch" data-series="0"></i>Air</span>
+          <span class="viz-legend__item"><i class="viz-legend__swatch" data-series="1"></i>Feels like</span>
+          <span class="viz-legend__item"><i class="viz-legend__swatch" data-series="2"></i>Dew point</span>
         </div>
-      </article>
-
-      <article class="card" aria-labelledby="h-cache">
-        <h2 class="card__title" id="h-cache">Cache efficiency</h2>
-        <div class="donut-wrap">
-          <canvas id="cache-donut" role="img" aria-label="Cache hit ratio"></canvas>
-          <div class="donut-center"><strong id="cache-pct">0%</strong><span>hit rate</span></div>
+        <div class="chart-wrap chart-wrap--tall viz-host">
+          <canvas id="wx-temp" role="img" aria-label="Air temperature, apparent temperature and dew point over fourteen days"></canvas>
         </div>
-        <ul class="statlist">
-          <li><span>Served from cache</span><strong id="st-hit">0</strong></li>
-          <li><span>Fetched from network</span><strong id="st-miss">0</strong></li>
-          <li><span>Estimated data saved</span><strong id="st-saved">0 KB</strong></li>
-        </ul>
+        <p class="viz-insight" id="wx-temp-insight"></p>
+        <div class="table-scroll" id="wx-temp-table"></div>
       </article>
 
-      <article class="card" aria-labelledby="h-usage">
-        <h2 class="card__title" id="h-usage">Most viewed places</h2>
-        <div class="bars" id="usage-bars"></div>
-        <p class="empty" id="usage-empty">Search a few cities and your personal usage chart appears here.</p>
-      </article>
+      <div class="grid grid--analysis">
+        <article class="card" aria-labelledby="h-wx-dt">
+          <h2 class="card__title" id="h-wx-dt">Mean temperature by hour of day</h2>
+          <div class="chart-wrap chart-wrap--sm viz-host">
+            <canvas id="wx-diurnal-temp" role="img" aria-label="Average temperature for each hour of the day"></canvas>
+          </div>
+        </article>
+        <article class="card" aria-labelledby="h-wx-dr">
+          <h2 class="card__title" id="h-wx-dr">Mean rain probability by hour of day</h2>
+          <div class="chart-wrap chart-wrap--sm viz-host">
+            <canvas id="wx-diurnal-rain" role="img" aria-label="Average probability of rain for each hour of the day"></canvas>
+          </div>
+        </article>
+      </div>
+      <p class="viz-insight" id="wx-diurnal-insight"></p>
 
-      <article class="card" aria-labelledby="h-events">
-        <div class="card__head">
-          <h2 class="card__title" id="h-events">Event log</h2>
-          <div class="card__actions">
-            <button class="btn btn--ghost btn--sm" id="btn-export" type="button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg> Export JSON
-            </button>
-            <button class="btn btn--ghost btn--sm" id="btn-clear-analytics" type="button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-trash"></use></svg> Clear
-            </button>
+      <article class="card" aria-labelledby="h-wx-rain">
+        <h2 class="card__title" id="h-wx-rain">Rainfall</h2>
+        <div class="grid grid--analysis">
+          <div>
+            <p class="viz-subtitle">Daily total</p>
+            <div class="chart-wrap chart-wrap--sm viz-host">
+              <canvas id="wx-rain-daily" role="img" aria-label="Rainfall total for each day"></canvas>
+            </div>
+          </div>
+          <div>
+            <p class="viz-subtitle">Running total</p>
+            <div class="chart-wrap chart-wrap--sm viz-host">
+              <canvas id="wx-rain-cum" role="img" aria-label="Cumulative rainfall across the period"></canvas>
+            </div>
           </div>
         </div>
-        <div class="log" id="event-log" role="log" aria-live="off"></div>
+        <p class="viz-insight" id="wx-rain-insight"></p>
+        <div class="table-scroll" id="wx-rain-table"></div>
       </article>
+
+      <div class="grid grid--analysis">
+        <article class="card" aria-labelledby="h-wx-wind">
+          <h2 class="card__title" id="h-wx-wind">Wind rose</h2>
+          <div class="chart-wrap chart-wrap--square viz-host">
+            <canvas id="wx-rose" role="img" aria-label="Frequency of wind by direction and speed band"></canvas>
+          </div>
+          <div class="viz-legend" id="wx-rose-legend"></div>
+          <p class="viz-insight" id="wx-wind-insight"></p>
+          <div class="table-scroll" id="wx-wind-table"></div>
+        </article>
+
+        <article class="card" aria-labelledby="h-wx-press">
+          <h2 class="card__title" id="h-wx-press">Mean sea-level pressure</h2>
+          <div class="chart-wrap chart-wrap--sm viz-host">
+            <canvas id="wx-pressure" role="img" aria-label="Mean sea-level pressure over fourteen days"></canvas>
+          </div>
+          <p class="viz-insight" id="wx-pressure-insight"></p>
+          <h3 class="card__title">Sky and sun</h3>
+          <div class="table-scroll" id="wx-sky-table"></div>
+          <p class="viz-insight" id="wx-sky-insight"></p>
+        </article>
+      </div>
+
+      <article class="card" aria-labelledby="h-wx-heat">
+        <h2 class="card__title" id="h-wx-heat">Heat stress — estimated Wet Bulb Globe Temperature</h2>
+        <div class="chart-wrap chart-wrap--sm viz-host">
+          <canvas id="wx-heat" role="img" aria-label="Hours spent in each heat stress band"></canvas>
+        </div>
+        <p class="viz-insight" id="wx-heat-insight"></p>
+        <div class="table-scroll" id="wx-heat-table"></div>
+      </article>
+
+      <article class="card" aria-labelledby="h-wx-corr">
+        <h2 class="card__title" id="h-wx-corr">How the variables move together</h2>
+        <p class="viz-insight" id="wx-corr-insight"></p>
+        <div class="table-scroll" id="wx-corr-table"></div>
+      </article>
+
+      <details class="diag">
+        <summary>App diagnostics — how this page itself is performing</summary>
+        <p class="card__hint">
+          Core Web Vitals and API timings, measured in your browser. Nothing here is weather;
+          it is here so a slow session can be diagnosed.
+        </p>
+        <div class="table-scroll" id="wx-diag-table"></div>
+        <div class="card__actions">
+          <button class="btn btn--ghost btn--sm" id="btn-export" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg> Export JSON
+          </button>
+          <button class="btn btn--ghost btn--sm" id="btn-clear-analytics" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-trash"></use></svg> Clear
+          </button>
+        </div>
+      </details>
     </div>
   </section>
+
 </main>
 
 <footer class="footer">
@@ -734,7 +794,7 @@
 
     <button class="btn btn--google" id="btn-google" type="button">
       <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-google"></use></svg>
-      Continue with Google
+      <span id="btn-google-label">Continue with Google</span>
     </button>
 
     <div class="divider"><span>or use email</span></div>
@@ -804,6 +864,20 @@
       Stored only in this browser. For a public deployment, copy <code>config.example.js</code>
       to <code>config.js</code> and add a domain-restricted key there.
     </span>
+  </label>
+
+  <label class="field">
+    <span class="field__label">Firebase config — enables Google sign-in</span>
+    <textarea class="input input--code" id="set-firebase" rows="5" spellcheck="false" autocomplete="off"
+      placeholder='{ "apiKey": "AIza…", "authDomain": "your-project.firebaseapp.com", "projectId": "your-project", "appId": "1:…" }'></textarea>
+    <span class="field__hint">
+      Google sign-in needs an identity provider, and a static site cannot supply one on its own.
+      Create a free Firebase project, enable <strong>Google</strong> under Authentication → Sign-in method,
+      add this site to <strong>Authorized domains</strong>, then paste the web config object here.
+      It is not a secret — it identifies your project; your security comes from the authorised-domain
+      list and Firestore rules. Stored in this browser only.
+    </span>
+    <span class="field__error" id="set-firebase-err" aria-live="polite"></span>
   </label>
 
   <label class="field">

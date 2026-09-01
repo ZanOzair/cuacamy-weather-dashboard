@@ -21,49 +21,296 @@ No framework. No bundler. No `node_modules`. No build step. **No API key needed.
 
 ---
 
-## What it does
+## Contents
 
-A weather dashboard for Malaysia that behaves like a real product, not a tutorial exercise.
+**Using CuacaMY** — you need nothing but a browser
+[What it is](#what-it-is) ·
+[Try it now](#try-it-now) ·
+[**Installation**](#installation) ·
+[**How to use it, A to Z**](#how-to-use-it-a-to-z) ·
+[Screens](#more-screens) ·
+[Troubleshooting](#troubleshooting)
 
-| | |
-|---|---|
-| **Works with no setup** | Open-Meteo is the default provider — no key, no sign-up. Open the link and you get real live weather immediately. |
-| **Finds you** | Detects your location on arrival and shows the weather and hazards for exactly where you are. |
-| **Hazard alerts** | Rainfall, thunderstorms, downpour intensity, wind gusts, heat, UV, haze, river flooding and earthquakes — each graded, explained, and sourced. |
-| **Alarm & notifications** | Desktop notifications and an audible alarm above a severity you choose. |
-| **Search anywhere** | Instant autocomplete over **206 Malaysian towns across all 16 states and federal territories**, bundled into the app — plus worldwide geocoding. |
-| **Current conditions** | Temperature, feels-like, humidity, wind speed and bearing, pressure, visibility, cloud cover, computed dew point and a plain-English comfort reading. |
-| **5-day forecast** | Clean cards with high/low, dominant condition, rain probability and a relative temperature-range bar. Tap any day for its 3-hourly breakdown. |
-| **Next 24 hours** | A smoothed Canvas chart you can switch between temperature, rain chance and wind. |
-| **Air quality** | The Malaysian DOE **Air Pollutant Index** — the 0–500 scale Malaysians actually use — computed from PM2.5 and PM10, with a full pollutant breakdown. |
-| **Monsoon calendar** | Which of the four phases we are in, what it means, and whether your state is in its main impact zone. |
-| **Local climate normal** | Computes the 1991–2020 normal for *your* coordinates from 30 years of reanalysis, then shows this month's temperature and rainfall anomaly. |
-| **Analytical assistant** | Ask it questions in plain English. It answers from the loaded data and shows the readings behind each answer. |
-| **Navigation** | One-tap **Waze** and **Google Maps** deep links that hand off to the native app on mobile. |
-| **Accounts** | Sign up, sign in and sign out — locally with WebCrypto, through Google, or through Firebase. |
-| **Google sign-in without Firebase** | A guided wizard turns on *Sign in with Google* from a single OAuth client ID. No Firebase project, no billing account, about five minutes. |
-| **Admin database view** | The site owner can see every account on the device, its sign-in history and storage use, and export the lot as JSON or CSV — plus a plain explanation of where the data physically lives. |
-| **Official agency directory** | Seventeen Malaysian authorities — MetMalaysia, JPS InfoBanjir, NADMA, Bomba, APM, DOE, TNB, MCMC and the telcos — each with the number to ring and the page where a report is filed. |
-| **Notification centre** | Queued, stacking, dismissable alerts with actions, an unread badge, and a rolling history that survives a reload. |
-| **Sync** | Saved places and preferences persist in IndexedDB and mirror to Cloud Firestore when signed in. |
-| **Weather analysis** | 336 hourly observations — 7 days behind, 7 ahead — put through the standard meteorological treatments: descriptive statistics, diurnal cycles, rainfall structure, a wind rose, pressure tendency, WBGT heat stress and correlations. |
-| **Offline** | Full PWA: installable, service-worker cached, and usable in aeroplane mode. |
-| **Never stale** | The service worker is network-first for the app shell and stamped with the commit SHA at deploy time, so a returning visitor always runs the deployed build — with an in-app reload prompt when a new one lands. |
-| **Every phone** | Verified with no horizontal overflow across six handset viewports from a 320px iPhone SE up, with safe-area insets for notches, 44px touch targets and no iOS focus zoom. |
+**Running it yourself** — only if you want your own copy
+[For the site owner](#for-the-site-owner) ·
+[Running your own copy](#running-your-own-copy) ·
+[Deployment](#deployment) ·
+[How it is built](#how-it-is-built) ·
+[Testing](#testing)
 
 ---
 
-## Live demo
+## What it is
+
+CuacaMY is a **free weather app for Malaysia**. It shows the weather where you are right
+now, warns you about floods, storms, haze and earthquakes near you, and tells you which
+government agency to call when something goes wrong.
+
+It works in any web browser, and you can **install it on your phone like a normal app**.
+There is nothing to buy, no account needed to use it, and no advertising.
+
+| | |
+|---|---|
+| **Free, no sign-up** | Open the link and it works. An account is optional and only saves your favourite places. |
+| **Works offline** | Once installed it keeps showing your last readings with no signal. |
+| **Covers all of Malaysia** | 206 towns across all 13 states and 3 federal territories. |
+| **Warns you early** | Heavy rain, thunderstorms, strong wind, heat, UV, haze, river flooding and earthquakes. |
+| **Tells you who to call** | 17 official agencies with phone numbers and report links. |
+| **Small** | About 1 MB. Loads in under a second. |
+
+---
+
+## Try it now
 
 **→ https://zanozair.github.io/cuacamy-weather-dashboard/**
 
-**No API key required.** The demo serves real live data from Open-Meteo, which needs no
-sign-up and permits browser requests. Add an OpenWeatherMap key only if you specifically
-want that provider.
+No key, no sign-up, no advertising. Real live data from Open-Meteo, which permits browser
+requests without registration.
 
 If every provider is unreachable — you are offline, or an API is down — the app falls back
 to a deterministic synthetic model rather than showing an empty shell, and labels it
 `Offline estimate` so you always know what you are looking at.
+
+---
+
+## Installation
+
+CuacaMY installs **from your browser**, not from an app store. There is no `.apk` to
+sideload and no App Store listing — the website *becomes* the app. Pick your device below.
+
+### 📱 Android — Chrome, Samsung Internet, Edge, Opera
+
+1. Open **https://zanozair.github.io/cuacamy-weather-dashboard/**
+2. Tap the **Install app** button at the top of the page
+   *(or the **⋮** menu → **Install app** / **Add to Home screen**)*
+3. Tap **Install** to confirm
+
+CuacaMY now sits with your other apps and opens full screen.
+
+### 🍎 iPhone and iPad — Safari **only**
+
+1. Open **https://zanozair.github.io/cuacamy-weather-dashboard/** in **Safari**
+2. Tap the **Share** button at the bottom — the square with an arrow pointing up
+3. Scroll down and tap **Add to Home Screen**
+4. Tap **Add** in the top-right corner
+
+> **Why Safari?** Apple does not let Chrome or Firefox on iOS add apps to the home screen.
+> That is an Apple restriction, not a limitation of CuacaMY. Open the link in Safari first.
+
+### 💻 Windows, Mac and Linux — Chrome, Edge, Brave
+
+1. Open **https://zanozair.github.io/cuacamy-weather-dashboard/**
+2. Click the **install icon** at the right-hand end of the address bar — a small screen
+   with a downward arrow
+3. Click **Install**
+
+No icon in the address bar? Use the browser menu:
+**Chrome** → *Cast, save and share* → *Install page as app*.
+**Edge** → *Apps* → *Install this site as an app*.
+
+CuacaMY opens in its own window and appears in your Start menu, Dock or Applications folder.
+
+### 🦊 Firefox
+
+Firefox **on a computer** cannot install web apps — but everything still works normally in
+the browser, including offline use. Firefox **on Android** can: **⋮** menu →
+**Add to Home screen**.
+
+### 📦 Download the source
+
+Prefer to keep a copy or run it yourself?
+
+- **[Download ZIP](https://github.com/ZanOzair/cuacamy-weather-dashboard/archive/refs/heads/main.zip)** — the whole app, about 1 MB
+- Or clone it: `git clone https://github.com/ZanOzair/cuacamy-weather-dashboard.git`
+
+See [Running your own copy](#running-your-own-copy) below.
+
+### To remove it
+
+Delete the icon like any other app. Nothing is left behind on your device.
+
+---
+
+## How to use it, A to Z
+
+Everything below works immediately, with no account and no setup.
+
+### A · Open it
+
+Go to **https://zanozair.github.io/cuacamy-weather-dashboard/**. The weather for Kuala
+Lumpur loads straight away.
+
+### B · Let it find you
+
+A small bar appears asking to use your location. Tap **Use my location** and allow it in
+your browser. CuacaMY then shows the weather and any hazards for exactly where you are.
+
+Prefer not to share your location? Ignore the bar and use the search box instead — nothing
+is lost except the automatic part.
+
+### C · Search for any place
+
+Type into the search box at the top. Start typing `Kota Bh` and **Kota Bharu** appears.
+All 206 Malaysian towns are built into the app, so this works instantly and even offline.
+Cities outside Malaysia work too.
+
+Use <kbd>↑</kbd> <kbd>↓</kbd> to move through the list and <kbd>Enter</kbd> to choose.
+
+### D · Read the current weather
+
+The big card shows the temperature now, what it *feels* like, and the conditions. Below it:
+
+| Reading | What it means for you |
+|---|---|
+| **Feels like** | What the air actually feels like once humidity is counted. In Malaysia this is often 4–6 °C above the real temperature. |
+| **Humidity** | Above 80% means sweat will not evaporate — you will feel much hotter. |
+| **Dew point** | The honest comfort number. Under 18 °C is pleasant; over 24 °C is oppressive. |
+| **Wind** | Speed and the direction it blows *from*. |
+| **Pressure** | A sharp fall often comes before a storm. |
+| **Visibility** | Drops during haze and heavy rain. |
+| **UV index** | 8 or above: cover up between 11am and 3pm. |
+| **Air quality (API)** | Malaysia's own 0–500 Air Pollutant Index. Under 50 is good; over 100 is unhealthy. |
+
+### E · Check the next few hours
+
+The hourly chart shows the next 24 hours. Use the buttons above it to switch between
+**temperature**, **chance of rain** and **wind**. Hover or tap any point to read the exact
+value and time.
+
+### F · Check the next five days
+
+Five cards, one per day: the high and low, the main condition, and the chance of rain.
+**Tap any card** to open that day's three-hourly breakdown.
+
+### G · Save the places you check often
+
+Press the **Save** button (the star) next to a place name. Home, work, your parents' town — up to
+12 places, and CuacaMY watches all of them for warnings, not just the one on screen.
+
+Saved places appear on the dashboard. Tap one to switch to it instantly.
+
+### H · Turn on hazard warnings
+
+Open the **Hazard alerts** tab. CuacaMY continuously checks for:
+
+- Heavy rain and the official MetMalaysia rainfall bands (60 / 150 / 250 mm per 24 h)
+- Thunderstorms and dangerous wind gusts
+- Heat and UV, using the same thresholds MetMalaysia uses for heatwave levels
+- Haze, using Malaysia's Air Pollutant Index
+- **River flooding**, from the Copernicus global flood model
+- **Earthquakes** near you, from the United States Geological Survey
+
+Each warning is graded 1 to 4, and every one shows the actual reading behind it and where
+that reading came from — so you can judge it yourself.
+
+Press **Enable notifications** to get an alert even when you are on another tab, and
+**Hear the alarm** to know what it sounds like.
+
+> **Important:** CuacaMY's warnings are calculated from public weather models. They are
+> **not** official warnings. Always check MetMalaysia and JPS InfoBanjir, both linked in
+> the app, and call **999** in an emergency.
+
+### I · Know who to call
+
+Scroll down the **Hazard alerts** tab to **Report it — official Malaysian agencies**.
+Seventeen authorities grouped by what they handle, each with a tappable phone number and
+the page where a report is actually filed:
+
+| If this is happening | Contact |
+|---|---|
+| Anyone is in danger, water entering a home, someone trapped | **999** — police, ambulance, fire, civil defence |
+| You need rescue or evacuation | **Bomba 999** · APM 03-8064 2400 |
+| You want the official weather warning | **MetMalaysia** 03-7967 8000 |
+| You want the real river level | **JPS InfoBanjir** 03-2691 9011 |
+| You need disaster relief or aid | **NADMA** 03-8870 4800 |
+| Open burning or haze | **DOE** 1-800-88-2727 |
+| Power cut or a fallen power line | **TNB 15454** |
+| No water supply (KL / Selangor) | **Air Selangor 15300** |
+| Mobile or internet down | Your operator, then **MCMC** 1-800-188-030 |
+| Flooded or blocked highway | **LLM** 1-800-88-7752 |
+
+**999** is also at the bottom of every page.
+
+### J · Understand the season
+
+The **Season & climate** tab shows which monsoon phase Malaysia is in right now, what it
+means, and whether your state is in its main impact zone.
+
+- **Northeast monsoon** (Nov–Mar) — the main rainy season; the east coast floods
+- **Inter-monsoon** (Apr–May, Oct) — thunderstorms and squalls
+- **Southwest monsoon** (Jun–Sep) — drier, with the highest haze risk
+
+Press **Compute for this location** and CuacaMY downloads thirty years of records
+for your exact coordinates and works out whether this month is genuinely unusual — with
+the arithmetic shown.
+
+### K · Ask a question
+
+The **assistant** box on the dashboard answers plain questions from the loaded data:
+
+> *"will it rain this afternoon?"* · *"should I bring an umbrella?"* ·
+> *"is it safe to jog?"* · *"how does this week look?"* · *"is the air OK?"*
+
+Every answer lists the readings it used, so you can check it.
+
+### L · Compare the whole country
+
+The **Explore Malaysia** tab lists every state and territory. Filter by state, or press
+**Compare state capitals** for a live table of all 16 at once.
+
+### M · Go deep on the weather
+
+The **Weather analysis** tab is for when you want the real detail: 336 hourly readings
+(seven days behind, seven ahead) put through proper meteorological treatment — daily and
+diurnal cycles, rainfall structure, a wind rose, pressure tendency, WBGT heat stress, and
+correlations between variables. Every chart has a table beside it with the numbers.
+
+### N · Get directions
+
+**Waze** and **Google Maps** buttons on each place hand off to the app on your phone.
+
+### O · Share a report
+
+The **Share** button sends a plain-text weather summary by email, message or any app on
+your phone.
+
+### P · Make it yours
+
+**Settings** — the gear icon in the top bar, or <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>,</kbd>:
+
+- **°C or °F** — also on the toggle in the top bar
+- **Light or dark theme** — dark by default
+- **What to show on startup** — your last place, your location, or Kuala Lumpur
+- **Which warnings to alert on** — set the minimum severity
+- **Alarm sound** — on or off
+- **Reduce motion** — turns off animations
+- **Usage analytics** — on by default, never leaves your device, and can be turned off
+
+### Q · Create an account (optional)
+
+You do **not** need one. It only keeps your saved places tied to an email instead of a
+browser. Press **Sign in** in the top bar.
+
+If the owner of the site has connected Google, you will see **Continue with Google** and
+one tap signs you in. If you do not see that button, this site is using email accounts
+only — that is normal.
+
+Your password never leaves your browser: it is protected with PBKDF2-SHA256 at 210,000
+rounds and only the scrambled result is stored.
+
+### R · Keep it up to date
+
+CuacaMY updates itself. When a new version arrives you get a **Reload now** notice.
+
+If you ever think you are looking at an old version:
+**Settings → Force a fresh copy**. Your account and saved places are untouched.
+
+### S · Read your notifications later
+
+The **🔔 bell** in the top bar keeps every warning and notice, so you can read something
+you glanced at while driving. The number badge counts what you have not read.
+
+---
 
 ### More screens
 
@@ -79,68 +326,65 @@ to a deterministic synthetic model rather than showing an empty shell, and label
 
 ---
 
-## Run it locally
+## Troubleshooting
 
-The app is an ES module, so it needs to be served over HTTP — opening `index.html`
-straight off disk will be blocked by the browser's CORS rules.
+| Problem | Fix |
+|---|---|
+| **I see an old version** | Settings → **Force a fresh copy**. Clears every cache and reloads; your data is kept. |
+| **"Install app" button is missing** | You are already running the installed app, or your browser cannot install web apps (Firefox on desktop, or Chrome/Firefox on iOS). See [Installation](#installation). |
+| **Nothing happens when I press Install on iPhone** | Apple only allows this from **Safari**. Open the link in Safari. |
+| **No "Continue with Google" button** | The site owner has not connected Google. Use an email address and password — or, if it is your site, see [For the site owner](#for-the-site-owner). |
+| **Location does not work** | Your browser has blocked it. Look for the padlock or location icon in the address bar and allow it, then reload. |
+| **It says "Offline estimate"** | Every weather provider was unreachable. The app is showing a synthetic model so the layout is not empty; it will recover on its own. |
+| **Notifications do not appear** | Press **Enable notifications** in the Hazard alerts tab, then allow it. If your browser has already blocked the site, re-enable it in the browser's site settings. |
+| **My saved places disappeared** | They are stored per browser. A different browser, a private window, or clearing site data will lose them. Sign in, or use Firebase, to tie them to an account. |
 
-```bash
-git clone https://github.com/ZanOzair/cuacamy-weather-dashboard.git
-cd cuacamy-weather-dashboard
+---
+## For the site owner
 
-# any static server works — pick one
-python3 -m http.server 8000
-npx serve .
-php -S localhost:8000
-```
+**Everything above works with no setup at all.** This section is only for you — the person
+running the site. Your visitors never see any of it.
 
-Then open <http://localhost:8000>. That is the entire setup.
+### Publish your own copy
 
-### Adding live weather data
+1. **Fork** this repository, or download the ZIP and push it to a new repository of your own
+2. In your repository: **Settings → Pages**
+3. Set **Source** to *Deploy from a branch*, branch **`gh-pages`**, folder **`/ (root)`**
+4. Push any commit to `main`
 
-1. Get a free key at [openweathermap.org/api](https://openweathermap.org/api).
-2. Either paste it into the in-app **Settings** dialog (stored in your browser only,
-   never committed), **or** put it in `config.js`:
+The included workflow publishes the site and then checks the live URL actually serves it,
+so a broken deploy fails loudly instead of sitting there silently.
 
-```js
-export default {
-  openWeatherKey: 'your-key-here',
-  firebase: null,
-  googleMapsKey: ''
-};
-```
+Your site appears at `https://YOUR-USERNAME.github.io/YOUR-REPO-NAME/`.
 
-> **New keys take up to two hours to activate.** A `401` right after signing up is
-> normal — wait, then try again.
+### Optional: let visitors sign in with Google
 
-Only free-tier endpoints are used, so a brand-new account is enough:
-`/data/2.5/weather`, `/data/2.5/forecast`, `/data/2.5/air_pollution`,
-`/geo/1.0/direct` and `/geo/1.0/reverse`.
+By default the app offers email-and-password accounts and the Google button is hidden.
+To turn Google on, you register your site with Google **once**. This is Google's rule for
+every website, not a limitation of this app. It is free and needs no billing account.
 
-### Turning on Google sign-in (the five-minute route)
-
-Google will not let *any* website use Google accounts until that site is registered
-with Google. That is a rule on Google's side, not a limitation of this app, and there
-is no way around it — but there is a much cheaper route than standing up Firebase.
-
-**All you need is an OAuth 2.0 Web client ID.** Free, no billing account, no Firebase
-project. The app has a guided wizard: open the account dialog and press
-**Set up Google sign-in**. It shows you the exact origin to paste into Google Cloud
-and validates the client ID before saving it.
+**Where to do it:** open your site → account icon → **Settings** → *Google Client ID*, or
+press **Open the guided setup** for the same steps inside the app.
 
 <details>
-<summary><strong>The same steps, written out</strong></summary>
+<summary><strong>The five steps, written out</strong></summary>
 
-1. Open [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials)
+1. Go to **[console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials)**
    and create a project if you have none.
-2. **OAuth consent screen** → *External* → give it a name and your email → save.
-   Leaving it in *Testing* mode is fine; add your own address under *Test users*
-   and it works immediately.
-3. **Create credentials → OAuth client ID → Web application.**
-4. Add your site's address to **both** *Authorised JavaScript origins* and
+2. **OAuth consent screen** → *External* → give it a name and your email → **Save**.
+   Leaving it in *Testing* mode is fine; add your own address under *Test users*.
+3. **Create credentials** → **OAuth client ID** → **Web application**.
+4. Add your site's address to **both** *Authorised JavaScript origins* **and**
    *Authorised redirect URIs* — for example `https://yourname.github.io`.
-   It must match exactly, with no trailing slash.
-5. Copy the **Client ID** and paste it into the wizard, or set it in `config.js`:
+   It must match exactly, with **no trailing slash**.
+5. Copy the **Client ID** and paste it into the app.
+
+</details>
+
+Once saved, every visitor sees **Continue with Google** and signs in with one tap.
+
+To make it permanent for everyone rather than just your browser, put the same ID in
+`config.js` in your repository:
 
 ```js
 export default {
@@ -148,57 +392,31 @@ export default {
 };
 ```
 
-A client ID is a public identifier, not a secret — it is designed to be visible in
-the page, and it only works from the origins you authorised in step 4.
+> A Client ID is **not** a secret. It is a public identifier designed to be visible in the
+> page, and it only works from the web addresses you authorised in step 4.
 
-**How the token is checked.** Google hands back a signed JWT. A static site has no
-server, so it cannot verify that signature itself — and simply decoding the payload
-would accept any forged token. Instead the app sends the token to Google's
-`tokeninfo` endpoint, which validates the signature, and then checks that `aud`
-matches your own client ID and `iss` is Google. That closes the obvious hole. It is
-still weaker than a real backend, because anything in a browser database can be
-edited by whoever owns the browser — the app says so in the sign-in dialog rather
-than implying otherwise.
+### Optional: a real central database
 
-### Where the user database actually is
-
-Sign in, open your account, and press **Database & users**. It shows every account on
-the device, how each one signs in, when they were last seen, how many places they have
-saved, how much storage is in use, and exports to JSON or CSV.
-
-The honest answer to "where is my database" depends on how you have set the site up:
+By default there is no central user database, because a static site on GitHub Pages has no
+server to run one. Each visitor's account lives in their own browser.
 
 | Setup | Where accounts live | Can you see them all? |
 |---|---|---|
-| Default | IndexedDB, database `cuacamy`, store `users`, in **each visitor's own browser** | No — there is no central table to see. Each browser holds its own. |
-| Firebase configured | **Cloud Firestore**, collection `users`, one document per account, in your own Google Cloud project | Yes — open the [Firebase console](https://console.firebase.google.com/). |
+| **Default** | IndexedDB, database `cuacamy`, store `users`, in each visitor's own browser | **No** — there is no central table. Each browser holds its own. |
+| **With Firebase** | **Cloud Firestore**, collection `users`, one document per account, in your own Google Cloud project | **Yes** — open the [Firebase console](https://console.firebase.google.com/) |
 
-A static site on GitHub Pages has no server, so by default there is nowhere for a
-shared database to run. That is genuinely private, and useless for "how many users do
-I have". If you want one real central database you can read as the owner, add a
-Firebase config — the app switches over automatically and the admin panel points at it.
-
-### Enabling real accounts and cloud sync (optional)
-
-Without configuration the app uses **local accounts**. Supply a Firebase config in
-`config.js` and it switches to **Firebase Authentication** (email/password *and*
-Google sign-in) with saved places synced to Cloud Firestore. Nothing else changes —
-both back ends sit behind one interface.
-
-**Google sign-in** needs an identity provider, which a static site cannot supply on its
-own. Setting it up no longer means editing a file: open **Settings**, paste your Firebase
-web config into the Firebase field, and the app validates it and reloads. It accepts the
-JavaScript object literal the Firebase console shows as well as strict JSON.
+To switch to Firebase, paste your Firebase web config into **Settings → Firebase config**.
+The app changes over automatically and turns on Google sign-in at the same time.
 
 <details>
 <summary><strong>Firebase setup, step by step</strong></summary>
 
-1. Create a project at [console.firebase.google.com](https://console.firebase.google.com).
-2. **Build → Authentication → Sign-in method**: enable *Email/Password* and *Google*.
-3. **Build → Firestore Database**: create a database.
-4. **Project settings → Your apps → Web**: copy the config object into `config.js`.
-5. **Authentication → Settings → Authorized domains**: add the domain you deploy to.
-6. Lock Firestore down so users can only touch their own document:
+1. Create a project at **[console.firebase.google.com](https://console.firebase.google.com)**
+2. **Build → Authentication → Sign-in method**: enable *Email/Password* and *Google*
+3. **Build → Firestore Database**: create a database
+4. **Project settings → Your apps → Web**: copy the config object
+5. **Authentication → Settings → Authorized domains**: add your site's domain
+6. Lock Firestore down so people can only touch their own record:
 
 ```js
 rules_version = '2';
@@ -212,10 +430,65 @@ service cloud.firestore {
 ```
 
 The Firebase web config is **not** a secret — it identifies your project, it does not
-authorise anything. Your actual security boundary is the Authorized Domains list plus
-the rules above.
+authorise anything. Your real security is the Authorized Domains list plus these rules.
 
 </details>
+
+### See your users
+
+Sign in, open your account, and press **Database & users**. You get every account on the
+device, how each one signs in, when they were last seen, how many places they have saved,
+how much storage is in use, and export to JSON or CSV.
+
+The first account created on a device becomes its owner. To fix a specific owner, set
+`adminEmail` in `config.js`.
+
+### Optional: use OpenWeatherMap instead
+
+CuacaMY uses **Open-Meteo** by default, which needs no key. To use OpenWeatherMap, get a
+free key at [openweathermap.org/api](https://openweathermap.org/api) and paste it into
+**Settings**, or put it in `config.js`.
+
+> A brand-new OpenWeatherMap key takes up to two hours to activate. A `401` right after
+> signing up is normal — wait, then try again.
+
+Only free-tier endpoints are used.
+
+---
+
+## Running your own copy
+
+The app is an ES module, so it must be served over HTTP — opening `index.html` straight off
+disk will be blocked by the browser.
+
+```bash
+git clone https://github.com/ZanOzair/cuacamy-weather-dashboard.git
+cd cuacamy-weather-dashboard
+
+# any static server works — pick one
+python3 -m http.server 8000
+npx serve .
+php -S localhost:8000
+```
+
+Then open <http://localhost:8000>. That is the entire setup — there is nothing to install,
+compile or bundle.
+
+To add your own keys, copy the template:
+
+```bash
+cp config.example.js config.js
+```
+
+`config.js` is git-ignored, so your keys stay out of version control.
+
+### Checking your changes
+
+```bash
+node tools/static-checks.mjs   # duplicate ids, dead selectors, CSP gaps, version drift
+node tools/api-contract.mjs    # every external API still returns what the app reads
+PORT=8000 node tools/e2e.mjs   # drives the real UI in a browser (needs a server running)
+```
 
 ---
 
@@ -223,53 +496,30 @@ the rules above.
 
 Two workflows, deliberately separate:
 
-- [`ci.yml`](.github/workflows/ci.yml) — runs on every push and pull request. Syntax-checks
-  the JavaScript, validates the manifest, verifies every asset referenced by `index.html`
-  and the manifest actually exists, and warns if an API key has been committed. This is
-  what the build badge tracks.
+- [`ci.yml`](.github/workflows/ci.yml) — runs on every push and pull request, plus daily.
+  Syntax-checks the JavaScript, validates the manifest, verifies every referenced asset
+  exists, runs the structural checks, calls all nine external APIs for real, and drives
+  the whole UI in a browser.
 - [`pages.yml`](.github/workflows/pages.yml) — publishes to GitHub Pages on every push to
-  `main`, then verifies the deployed site over the network.
+  `main`, then proves the deployed site is really serving that build.
 
-`pages.yml` publishes by pushing the site to the `gh-pages` branch, then a second job
-fetches the live URL and fails the build unless it returns `200`, contains the app, and
-serves `app.js`, `style.css`, the manifest, the service worker and an icon. Deployment is
-therefore proven on every push, not assumed.
+`pages.yml` publishes by pushing to the `gh-pages` branch, stamps the commit SHA into
+`sw.js`, then waits until the live URL actually serves **that** build before passing. A
+deploy that silently serves stale bytes fails the job.
 
 <details>
 <summary><strong>Why push a branch instead of using <code>actions/deploy-pages</code>?</strong></summary>
 
-`actions/deploy-pages` publishes through the `github-pages` environment. When Pages is
-served from a branch, that environment admits only the branch it serves, so a run
-triggered from `main` is rejected before it starts:
+That action deploys through the `github-pages` environment, and when Pages is served from
+a branch the environment only permits that branch to deploy — a run from `main` is
+rejected with *"Branch main is not allowed to deploy to github-pages due to environment
+protection rules."* Pushing the branch directly needs no environment, so it works
+regardless of how Pages was switched on.
 
-```
-Branch "main" is not allowed to deploy to github-pages
-due to environment protection rules.
-```
-
-Two neighbouring approaches fail for their own reasons, and both are worth knowing:
-
-- A repository's `GITHUB_TOKEN` may not *create* a Pages site — the API answers
-  `Resource not accessible by integration` — so `actions/configure-pages` with
-  `enablement: true` cannot bootstrap Pages on a fresh repo.
-- The publish step deliberately excludes `.github/` from the copied tree. A
-  `GITHUB_TOKEN` push is refused outright if it would add or modify anything under
-  `.github/workflows`, which would otherwise break the job on every run.
-
-Pushing the branch touches none of that machinery, so it works regardless of how Pages
-was switched on.
+Note the `--exclude='.github'`: a `GITHUB_TOKEN` push is refused if it would touch files
+under `.github/workflows`, which would break the job on every run.
 
 </details>
-
-Because it is pure static files, it also drops onto Netlify, Vercel, Cloudflare Pages or
-any web server unchanged — no configuration, no build command.
-
-**One header worth adding** where your host allows it — browsers ignore `frame-ancestors`
-in a `<meta>` CSP, so clickjacking protection has to come from a response header:
-
-```
-Content-Security-Policy: frame-ancestors 'none'
-```
 
 ---
 

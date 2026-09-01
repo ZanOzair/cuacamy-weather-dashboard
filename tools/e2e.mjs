@@ -309,12 +309,30 @@ check('Clear all really empties the history', cleared === 0, `${cleared} left`);
 await page.keyboard.press('Escape');
 await page.waitForTimeout(200);
 
-/* ── Google sign-in setup wizard ─────────────────────────────────────── */
+/* ── Signing in ──────────────────────────────────────────────────────────
+ * The rule that matters here: a visitor must never be shown a control that
+ * cannot do anything for them. With no Google provider connected, the whole
+ * Google block is absent — not greyed out, not a button that opens a Google
+ * Cloud wizard the visitor has no business seeing. */
 await page.click('#btn-account');
-await page.waitForTimeout(400);
-await page.click('#btn-google');
 await page.waitForTimeout(500);
-check('Pressing Google with no provider opens the setup wizard', await page.isVisible('#google-setup-dialog'));
+check('With no provider connected, the Google block is not shown at all',
+  await page.isHidden('#google-block'));
+check('The email form is still offered', await page.isVisible('#auth-form'));
+const modeNote = await page.textContent('#auth-mode-note');
+check('The sign-in note does not push owner setup at a visitor',
+  !/set up|wizard|client id|firebase/i.test(modeNote), modeNote.slice(0, 70) + '…');
+
+// The wizard still exists — it just belongs to the owner, reached from Settings.
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+await page.evaluate(() => document.querySelector('#btn-settings')?.click());
+await page.waitForTimeout(500);
+await page.click('#set-google-wizard');
+await page.waitForTimeout(500);
+check('The owner can reach the Google wizard from Settings',
+  await page.isVisible('#google-setup-dialog'));
+check('The wizard is labelled as owner-only', await page.isVisible('.owner-flag'));
 const shownOrigin = await page.textContent('#gs-origin');
 check('The wizard shows the exact origin to authorise with Google',
   shownOrigin === new URL(BASE).origin, shownOrigin);
@@ -324,9 +342,27 @@ await page.waitForTimeout(300);
 check('A malformed client ID is rejected before Google ever sees it',
   (await page.textContent('#gs-err')).length > 0);
 await page.keyboard.press('Escape');
-await page.waitForTimeout(200);
+await page.waitForTimeout(300);
 await page.keyboard.press('Escape');
-await page.waitForTimeout(200);
+await page.waitForTimeout(300);
+
+/* ── Installing as an app ────────────────────────────────────────────────
+ * Chromium in CI does not fire beforeinstallprompt, so the button falls back
+ * to per-platform instructions — which is exactly the path an iPhone user
+ * takes, and the one worth proving works. */
+await page.evaluate(() => document.querySelector('#install-card-cta')?.click());
+await page.waitForTimeout(500);
+check('Pressing Install always shows something', await page.isVisible('#install-dialog'));
+const platformBlocks = await page.$$eval('[data-platform]',
+  (ns) => ns.filter((n) => !n.hidden).map((n) => n.dataset.platform));
+check('Exactly one set of platform steps is shown, matching this browser',
+  platformBlocks.length === 1, platformBlocks.join(', ') || 'none');
+const stepCount = await page.$$eval('[data-platform]:not([hidden]) .install-steps li', (n) => n.length);
+check('Those steps are real instructions, not an empty panel', stepCount >= 1 || platformBlocks[0] === 'desktop-firefox',
+  `${stepCount} steps for ${platformBlocks[0]}`);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(300);
+notes.push(`Install path verified for platform "${platformBlocks[0]}"`);
 
 /* ── Official agency directory ───────────────────────────────────────── */
 await page.click('#tab-alerts');

@@ -87,6 +87,29 @@ const swVersion  = (sw.match(/^const VERSION\s+= 'v([^']+)'/m) || [])[1];
 check('app.js and sw.js report the same version', Boolean(appVersion) && appVersion === swVersion,
   `app ${appVersion} / sw ${swVersion}`);
 
+/* ── 9 · The guide must describe the app that exists ──────────────────── */
+// A README that names a button which was renamed is worse than no README: it
+// sends people looking for something that is not there. Every control the
+// guide tells a reader to press is checked against the markup.
+const readme = readFileSync('README.md', 'utf8');
+const PROMISED_CONTROLS = [
+  'Install app', 'Use my location', 'Enable notifications', 'Hear the alarm',
+  'Compute for this location', 'Compare state capitals', 'Force a fresh copy',
+  'Check for updates', 'Continue with Google', 'Not now'
+];
+const decoded = html.replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ');
+const absent = PROMISED_CONTROLS.filter((label) =>
+  readme.includes(label) && !decoded.includes(label));
+check('Every control the README names exists in the UI', absent.length === 0, absent.join(', '));
+
+// In-page links, using GitHub's slug rule: strip punctuation, then replace each
+// space with a hyphen WITHOUT collapsing runs (an em dash leaves two hyphens).
+const slug = (h) => h.toLowerCase().replace(/[^\w\s-]/g, '').trim().replace(/\s/g, '-');
+const headings = new Set([...readme.matchAll(/^#{2,4}\s+(.+)$/gm)].map((m) => slug(m[1])));
+const brokenAnchors = [...readme.matchAll(/\]\(#([^)]+)\)/g)]
+  .map((m) => m[1]).filter((a) => !headings.has(a));
+check('Every in-page README link resolves', brokenAnchors.length === 0, brokenAnchors.join(', '));
+
 console.log('');
 if (failures.length) {
   console.log(`${failures.length} static check(s) failed:`);

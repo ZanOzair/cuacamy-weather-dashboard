@@ -27,7 +27,7 @@
  * =========================================================================== */
 
 const BUILD_ID = 'dev';                 // replaced at deploy time
-const VERSION  = 'v1.2.0';
+const VERSION  = 'v1.3.0';
 const SHELL_CACHE = `cuacamy-shell-${VERSION}-${BUILD_ID}`;
 const DATA_CACHE  = `cuacamy-data-${VERSION}`;
 

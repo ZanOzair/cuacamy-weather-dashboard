@@ -167,6 +167,9 @@
   <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zm12 8H5v9h14v-9z"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 2a6 6 0 0 1 6 6v3.6l1.7 3.1A1 1 0 0 1 18.8 16H5.2a1 1 0 0 1-.9-1.3L6 11.6V8a6 6 0 0 1 6-6zm0 20a3 3 0 0 1-2.8-2h5.6A3 3 0 0 1 12 22z"/></symbol>
   <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9L12 2zm7 11l.9 2.6 2.6.9-2.6.9L19 20l-.9-2.6-2.6-.9 2.6-.9L19 13zM5.5 14l.7 2.1 2.1.7-2.1.7L5.5 20l-.7-2.5-2.1-.7 2.1-.7L5.5 14z"/></symbol>
+  <symbol id="i-share-ios" viewBox="0 0 24 24"><path d="M12 2.6a1 1 0 0 1 .7.3l3.5 3.5a1 1 0 0 1-1.4 1.4L13 5.99V15a1 1 0 1 1-2 0V6l-1.8 1.8a1 1 0 0 1-1.4-1.4l3.5-3.5a1 1 0 0 1 .7-.3zM5 11a1 1 0 0 1 1 1v7h12v-7a1 1 0 1 1 2 0v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z"/></symbol>
+  <symbol id="i-plus-square" viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm6 5v3H8a1 1 0 1 0 0 2h3v3a1 1 0 1 0 2 0v-3h3a1 1 0 1 0 0-2h-3V8a1 1 0 1 0-2 0z"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><path d="M12 4.5a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6zm0 5.7a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6zm0 5.7a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6z"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm0 8a1 1 0 0 0-1 1v6a1 1 0 1 0 2 0v-6a1 1 0 0 0-1-1zm0-4.4a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6z"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm4.7 6.3a1 1 0 0 0-1.4 0L10.8 12.8l-2.1-2.1a1 1 0 1 0-1.4 1.4l2.8 2.8a1 1 0 0 0 1.4 0l5.2-5.2a1 1 0 0 0 0-1.4z"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 2.6a1.6 1.6 0 0 1 1.4.8l8.3 14.4a1.6 1.6 0 0 1-1.4 2.4H3.7a1.6 1.6 0 0 1-1.4-2.4L10.6 3.4a1.6 1.6 0 0 1 1.4-.8zm0 5.4a1 1 0 0 0-1 1v4.6a1 1 0 1 0 2 0V9a1 1 0 0 0-1-1zm0 8a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4z"/></symbol>
@@ -231,6 +234,10 @@
         <svg class="icon-theme-dark" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-moon-ui"></use></svg>
         <svg class="icon-theme-light" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sun-ui"></use></svg>
       </button>
+      <button id="btn-install" class="btn btn--install" type="button" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg>
+        <span>Install app</span>
+      </button>
       <div class="notif-wrap">
         <button id="btn-notif" class="icon-btn" type="button" title="Notifications"
                 aria-label="Notifications" aria-expanded="false" aria-controls="notif-panel">
@@ -251,6 +258,9 @@
           </div>
         </div>
       </div>
+      <button id="btn-settings" class="icon-btn" type="button" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-gear"></use></svg>
+      </button>
       <button id="btn-account" class="account-btn" type="button" aria-label="Account">
         <span class="avatar" id="account-avatar" aria-hidden="true">
           <svg viewBox="0 0 24 24"><use href="#i-user"></use></svg>
@@ -486,6 +496,28 @@
           <button class="btn btn--primary" type="submit">Ask</button>
         </form>
       </article>
+
+      <!-- Install prompt -->
+      <article class="card card--install" id="install-card" aria-labelledby="h-install">
+        <div class="install-card__body">
+          <h2 class="card__title" id="h-install">Keep CuacaMY on your phone</h2>
+          <p>
+            Add it to your home screen and it opens like any other app — full screen, one tap,
+            and it still shows your last readings when you have no signal. Nothing to download
+            from a store, no account needed, about 1 MB.
+          </p>
+          <button class="btn btn--primary" id="install-card-cta" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg>
+            Install CuacaMY
+          </button>
+          <button class="btn btn--ghost btn--sm" id="install-card-dismiss" type="button">Not now</button>
+        </div>
+      </article>
+
+      <p class="card card--installed" id="install-done" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"></use></svg>
+        You are running the installed app. It works offline and updates itself.
+      </p>
 
       <!-- Saved places -->
       <article class="card card--saved" aria-labelledby="h-saved">
@@ -913,19 +945,23 @@
     <h2 class="dialog__title" id="auth-title">Sign in to CuacaMY</h2>
     <p class="dialog__sub">Sync your saved places and preferences across devices.</p>
 
-    <button class="btn btn--google" id="btn-google" type="button">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-google"></use></svg>
-      <span id="btn-google-label">Continue with Google</span>
-    </button>
+    <!-- Shown only when the site owner has connected Google. A visitor must
+         never be offered a button that cannot sign them in. -->
+    <div id="google-block" hidden>
+      <button class="btn btn--google" id="btn-google" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-google"></use></svg>
+        <span id="btn-google-label">Continue with Google</span>
+      </button>
 
-    <!-- Google draws its own button, and will only do so into a visible node. -->
-    <div class="google-host" id="google-host" hidden>
-      <p class="google-host__hint">Choose the Google account you want to use.</p>
-      <div id="google-render"></div>
-      <button class="btn btn--ghost btn--sm" id="google-cancel" type="button">Cancel</button>
+      <!-- Google draws its own button, and will only do so into a visible node. -->
+      <div class="google-host" id="google-host" hidden>
+        <p class="google-host__hint">Choose the Google account you want to use.</p>
+        <div id="google-render"></div>
+        <button class="btn btn--ghost btn--sm" id="google-cancel" type="button">Cancel</button>
+      </div>
+
+      <div class="divider"><span>or use email</span></div>
     </div>
-
-    <div class="divider"><span>or use email</span></div>
 
     <form id="auth-form" novalidate>
       <label class="field">
@@ -991,11 +1027,20 @@
     </button>
   </form>
 
-  <h2 class="dialog__title" id="gs-title">Turn on Google sign-in</h2>
+  <p class="owner-flag">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-gear"></use></svg>
+    For the site owner — you only do this once
+  </p>
+  <h2 class="dialog__title" id="gs-title">Turn on Google sign-in for your visitors</h2>
   <p class="dialog__sub">
-    Google will not let any website use its accounts until that site is registered with Google.
-    That is a rule on Google's side, not a limitation of this app — it takes about five minutes,
-    it is free, and no billing account is needed.
+    Your visitors will never see this screen. Once you finish these steps, everybody who opens
+    your site gets a <strong>Continue with Google</strong> button that signs them in with one tap —
+    no forms, no passwords.
+  </p>
+  <p class="dialog__sub">
+    Why it takes any setup at all: Google does not let <em>any</em> website use Google accounts
+    until that website is registered with Google. That is Google's rule, not a limit of this app.
+    It is free, needs no billing account, and takes about five minutes.
   </p>
 
   <ol class="setup-steps">
@@ -1040,10 +1085,16 @@
   </div>
 
   <p class="dialog__fineprint">
-    A client ID is a public identifier, not a secret — it is meant to be visible in the page,
-    and it only works from the origins you authorised above. It is stored in this browser only.
-    If you would rather have server-verified accounts and cross-device sync, add a Firebase
-    config in Settings instead; that path also turns this button on.
+    <strong>Is the Client ID a secret?</strong> No. It is a public identifier, designed to be
+    visible in the page, and it only works from the web addresses you authorised in step 4.
+    <br><br>
+    <strong>Where is it saved?</strong> In this browser only. To turn Google sign-in on for
+    everyone permanently, put the same ID into <code>config.js</code> in your repository —
+    see the README.
+    <br><br>
+    <strong>Want accounts that sync between devices?</strong> Add a Firebase config in Settings
+    instead. That gives you server-verified accounts and one central database, and it turns this
+    button on too.
   </p>
 </dialog>
 
@@ -1118,6 +1169,128 @@
   <p class="dialog__fineprint">
     Password hashes and salts are never shown here and are excluded from every export.
     Deleting an account removes its record and its saved places from this device permanently.
+  </p>
+</dialog>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     DIALOG · INSTALL
+     Every browser installs a web app differently, and two of them cannot be
+     prompted from code at all. Only the block matching the visitor's browser
+     is shown, so nobody reads instructions for a device they are not holding.
+     ══════════════════════════════════════════════════════════════════════════ -->
+<dialog id="install-dialog" class="dialog dialog--wide" aria-labelledby="install-steps-title">
+  <form method="dialog" class="dialog__close-form">
+    <button class="icon-btn icon-btn--sm dialog__x" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"></use></svg>
+    </button>
+  </form>
+
+  <h2 class="dialog__title" id="install-steps-title">Add CuacaMY to your device</h2>
+  <p class="dialog__sub">
+    CuacaMY installs straight from your browser — there is nothing to download from a store.
+    Once it is on your home screen it opens like any other app, full screen, and keeps working
+    when you have no signal.
+  </p>
+
+  <!-- iPhone / iPad, Safari -->
+  <div data-platform="ios-safari" hidden>
+    <ol class="install-steps">
+      <li>
+        <span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-share-ios"></use></svg></span>
+        Tap the <strong>Share</strong> button at the bottom of Safari — the square with an arrow pointing up.
+      </li>
+      <li>
+        <span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus-square"></use></svg></span>
+        Scroll down the list and tap <strong>Add to Home Screen</strong>.
+      </li>
+      <li>
+        <span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"></use></svg></span>
+        Tap <strong>Add</strong> in the top right. CuacaMY appears on your home screen.
+      </li>
+    </ol>
+    <p class="install-note">
+      iPhone and iPad only allow this from <strong>Safari</strong>. It is not available in Chrome
+      or Firefox on iOS — that is an Apple restriction, not a fault with this app.
+    </p>
+  </div>
+
+  <!-- iPhone / iPad, but not Safari -->
+  <div data-platform="ios-other" hidden>
+    <p class="install-note install-note--warn">
+      You are using Chrome, Firefox or Edge on an iPhone or iPad. Apple only lets
+      <strong>Safari</strong> add apps to the home screen.
+    </p>
+    <ol class="install-steps">
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-external"></use></svg></span>
+        Copy this page's address, open <strong>Safari</strong>, and paste it there.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-share-ios"></use></svg></span>
+        Tap <strong>Share</strong> at the bottom of Safari.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus-square"></use></svg></span>
+        Tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</li>
+    </ol>
+  </div>
+
+  <!-- Android, Chrome / Samsung Internet / Edge -->
+  <div data-platform="android" hidden>
+    <ol class="install-steps">
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dots"></use></svg></span>
+        Tap the <strong>⋮ menu</strong> in the top right of your browser.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg></span>
+        Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"></use></svg></span>
+        Confirm with <strong>Install</strong>. CuacaMY joins your other apps.</li>
+    </ol>
+    <p class="install-note">
+      If your browser offered you an <strong>Install app</strong> button on this page, that does
+      the same thing in one tap.
+    </p>
+  </div>
+
+  <!-- Android, Firefox -->
+  <div data-platform="android-firefox" hidden>
+    <ol class="install-steps">
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dots"></use></svg></span>
+        Tap the <strong>⋮ menu</strong> in Firefox.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus-square"></use></svg></span>
+        Tap <strong>Add to Home screen</strong>.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"></use></svg></span>
+        Confirm. CuacaMY appears on your home screen.</li>
+    </ol>
+  </div>
+
+  <!-- Desktop Chrome / Edge -->
+  <div data-platform="desktop" hidden>
+    <ol class="install-steps">
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg></span>
+        Look for the <strong>install icon</strong> at the right-hand end of the address bar —
+        a small screen with a downward arrow.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dots"></use></svg></span>
+        No icon? Open the browser menu and choose
+        <strong>Cast, save and share → Install page as app</strong> (Chrome), or
+        <strong>Apps → Install this site as an app</strong> (Edge).</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"></use></svg></span>
+        Click <strong>Install</strong>. CuacaMY opens in its own window and appears in your
+        Start menu, Dock or Applications folder.</li>
+    </ol>
+  </div>
+
+  <!-- Desktop Firefox -->
+  <div data-platform="desktop-firefox" hidden>
+    <p class="install-note install-note--warn">
+      Firefox on a computer does not support installing web apps. Everything still works
+      normally in the browser — including offline use.
+    </p>
+    <p class="install-note">
+      To get the installed experience, open this page in <strong>Chrome</strong>,
+      <strong>Edge</strong> or <strong>Brave</strong>. On an Android phone, Firefox
+      <em>can</em> add it to your home screen from the ⋮ menu.
+    </p>
+  </div>
+
+  <p class="dialog__fineprint">
+    Installing uses about 1 MB and needs no account. To remove it later, delete the icon like
+    any other app — nothing is left behind on your device.
   </p>
 </dialog>
 

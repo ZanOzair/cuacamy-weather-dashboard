@@ -1687,3 +1687,69 @@ select.input { cursor: pointer; appearance: none;
   color: var(--c-brand-400); text-decoration: underline; text-underline-offset: 2px;
 }
 .linkish:hover { color: var(--c-brand-300); }
+
+/* ── Install: button, card and step list ───────────────────────────────── */
+.btn--install {
+  background: var(--c-brand-500); color: #fff; border-color: var(--c-brand-500);
+  font-weight: 600; white-space: nowrap;
+}
+.btn--install:hover { background: var(--c-brand-400); border-color: var(--c-brand-400); }
+.btn--install svg { fill: currentColor; }
+
+.card--install {
+  grid-column: span 12;
+  border-color: color-mix(in srgb, var(--c-brand-500) 45%, var(--border));
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--c-brand-500) 12%, transparent),
+    transparent 62%);
+}
+.install-card__body { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); }
+.install-card__body p { color: var(--text-mut); max-width: 62ch; font-size: 14px; line-height: 1.7; }
+.install-card__body .btn svg { fill: currentColor; }
+
+.card--installed {
+  grid-column: span 12; display: flex; align-items: center; gap: var(--sp-3);
+  font-size: 14px; color: var(--text-mut); padding: var(--sp-4);
+}
+.card--installed svg { width: 18px; height: 18px; fill: var(--c-good); flex: none; }
+
+.install-steps {
+  list-style: none; margin: var(--sp-4) 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--sp-3);
+  counter-reset: step;
+}
+.install-steps li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-3);
+  align-items: start; font-size: 14.5px; line-height: 1.7; color: var(--text-mut);
+  background: var(--bg-sink); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4);
+}
+.install-steps li strong { color: var(--text); }
+.install-steps__icon {
+  display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--c-brand-500) 20%, transparent);
+}
+.install-steps__icon svg { width: 17px; height: 17px; fill: var(--c-brand-300, var(--c-brand-400)); }
+
+.install-note {
+  margin-top: var(--sp-4); font-size: 13.5px; line-height: 1.7; color: var(--text-mut);
+  border-left: 2px solid var(--border-str); padding-left: var(--sp-3);
+}
+.install-note--warn { border-left-color: var(--c-warn); }
+.install-note strong { color: var(--text); }
+
+/* An unmistakable "this is not for you, visitor" marker on owner-only dialogs. */
+.owner-flag {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: color-mix(in srgb, var(--c-accent-500) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-accent-500) 45%, transparent);
+  color: var(--c-accent-400); border-radius: var(--r-pill);
+  padding: 4px 12px; font-size: 11.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .05em; margin-bottom: var(--sp-3);
+}
+.owner-flag svg { width: 13px; height: 13px; fill: currentColor; }
+
+@media (max-width: 480px) {
+  .btn--install span { display: none; }
+  .btn--install { padding: 0 12px; }
+}

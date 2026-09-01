@@ -31,7 +31,7 @@
  * 01 · CONFIGURATION & CONSTANTS
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 
 /**
  * Runtime configuration, resolved in priority order:
@@ -71,7 +71,8 @@ const LS = {
   lastPlace: 'cuacamy.lastplace.v1',
   googleId:  'cuacamy.googleclient.v1',
   notifLog:  'cuacamy.notifications.v1',
-  admin:     'cuacamy.admin.v1'
+  admin:     'cuacamy.admin.v1',
+  installDismissed: 'cuacamy.install.dismissed.v1'
 };
 
 /** How long each kind of response stays fresh in the local cache (ms). */
@@ -6388,27 +6389,27 @@ function renderAuthUI() {
     $('#btn-admin').hidden = !Admin.isOwner();
   }
 
-  // Three possible states, and the button must tell the truth about which.
+  // Google sign-in is either connected or it is not, and a visitor should only
+  // ever meet the connected version.
+  //
+  // The previous build showed everybody a "Set up Google sign-in" button that
+  // opened a five-step Google Cloud wizard. That wizard is a one-time job for
+  // whoever RUNS the site; to a visitor who just wants to sign in it is
+  // meaningless, and it makes a working app look broken. So when Google is not
+  // connected the button is not shown at all — the email form is simply the
+  // only option — and the wizard lives in Settings, where the owner looks.
   const googleReady = Auth.mode === 'firebase' || Boolean(GoogleId.clientId());
+
+  $('#google-block').hidden = !googleReady;
+  $('#btn-google').disabled = false;
+  $('#btn-google-label').textContent = 'Continue with Google';
 
   $('#auth-mode-note').textContent =
     Auth.mode === 'firebase'
-      ? 'Signed in through Firebase Authentication. Your saved places sync to Cloud Firestore, so they follow you between devices.'
+      ? 'Your account is verified by Firebase Authentication, and your saved places sync to Cloud Firestore so they follow you between devices.'
       : googleReady
-        ? 'Google sign-in is on. Google verifies who you are; the account itself lives in this browser, so saved places stay on this device. Email and password accounts are hashed with PBKDF2-SHA256 (210,000 rounds) and never leave the browser either.'
-        : 'Local account mode: your password is hashed with PBKDF2-SHA256 (210,000 rounds) and stored only in this browser. Google sign-in needs the site registered with Google once — press “Set up Google sign-in” and the wizard walks through it in about five minutes.';
-
-  // Never disabled. A greyed-out button teaches nothing and looks broken; this
-  // one always does something, and says which something it will do.
-  const gbtn = $('#btn-google');
-  gbtn.disabled = false;
-  gbtn.dataset.ready = String(googleReady);
-  $('#btn-google-label').textContent = googleReady
-    ? 'Continue with Google'
-    : 'Set up Google sign-in';
-  gbtn.title = googleReady
-    ? 'Sign in with your Google account'
-    : 'Google requires this site to be registered once — this opens the guided setup';
+        ? 'Google confirms who you are. Your saved places are kept in this browser, so they stay on this device. Email accounts are protected with PBKDF2-SHA256 (210,000 rounds) and never leave the browser.'
+        : 'Your password is protected with PBKDF2-SHA256 (210,000 rounds) and is stored only in this browser — it is never sent anywhere. Saved places stay on this device.';
 }
 
 /* ── The Google sign-in setup wizard ───────────────────────────────────── */
@@ -6440,9 +6441,10 @@ async function saveGoogleClientId() {
   GoogleId._script = null;                 // force a reload with the new ID
   $('#google-setup-dialog').close();
   renderAuthUI();
-  toast('Google sign-in is on. Press “Continue with Google” to use it.', 'success', {
-    title: 'Set up',
-    action: { label: 'Sign in now', onClick: () => { $('#auth-dialog').showModal(); startGoogleSignIn(); } }
+  toast('Everyone visiting your site can now sign in with one tap on “Continue with Google”.', 'success', {
+    title: 'Google sign-in is on',
+    ms: 8000,
+    action: { label: 'Try it', onClick: () => { $('#auth-dialog').showModal(); } }
   });
 }
 
@@ -6460,7 +6462,15 @@ async function startGoogleSignIn() {
   const btn = $('#btn-google');
   msg.textContent = '';
 
-  if (Auth.mode !== 'firebase' && !GoogleId.clientId()) { openGoogleSetup(); return; }
+  // The button is not rendered at all unless Google is connected, so reaching
+  // here without a provider means something is out of step. Say so plainly
+  // rather than throwing an owner-facing wizard at a visitor.
+  if (Auth.mode !== 'firebase' && !GoogleId.clientId()) {
+    msg.dataset.type = 'error';
+    msg.textContent = 'Google sign-in is not switched on for this site. Please use an email address and password.';
+    $('#google-block').hidden = true;
+    return;
+  }
 
   btn.disabled = true;
   const restore = $('#btn-google-label').textContent;
@@ -6936,6 +6946,15 @@ function wireEvents() {
     window.addEventListener(evt, () => { Alerting.gestured = true; }, { once: true, passive: true });
   }
 
+  /* ── Installing the app ─────────────────────────────────────────────── */
+  $('#btn-install').addEventListener('click', () => Install.run());
+  $('#install-card-cta').addEventListener('click', () => Install.run());
+  $('#install-card-dismiss').addEventListener('click', () => {
+    $('#install-card').hidden = true;
+    safeLocal.set(LS.installDismissed, '1');
+    toast('Hidden. The Install button stays in the top bar whenever you want it.', 'info');
+  });
+
   /* ── Notification centre ────────────────────────────────────────────── */
   const notifPanel = $('#notif-panel');
   const notifBtn = $('#btn-notif');
@@ -7086,6 +7105,10 @@ function wireEvents() {
   });
 
   /* ── Settings ───────────────────────────────────────────────────────── */
+  // Settings used to be reachable only by Ctrl/Cmd + comma, or by the offline
+  // banner happening to appear. A phone has neither, which left "Force a fresh
+  // copy" and the Google setup effectively unreachable on mobile.
+  $('#btn-settings').addEventListener('click', openSettings);
   $('#banner-setup-cta').addEventListener('click', openSettings);
 
   $('#banner-geo-yes').addEventListener('click', async () => {
@@ -7302,6 +7325,136 @@ async function hardRefresh() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+ * 23B · INSTALLING CUACAMY AS AN APP
+ * ---------------------------------------------------------------------------
+ * A progressive web app installs from the browser rather than from a store:
+ * there is no .exe, no .apk and no App Store listing, because the site itself
+ * becomes the app. Once installed it gets a home-screen icon, opens without
+ * browser chrome, and keeps working offline from the service worker cache.
+ *
+ * Browsers differ in how they let a page ask:
+ *
+ *   Chrome, Edge, Samsung Internet, Android    fire `beforeinstallprompt`,
+ *   which can be saved and replayed from a button. This is the one-tap path.
+ *
+ *   Safari on iPhone and iPad                  never fire it. Installing is
+ *   Share → Add to Home Screen, done by hand, so the only honest thing a page
+ *   can do is show those steps clearly.
+ *
+ *   Firefox on desktop                         has no install concept at all;
+ *   on Android it is "Add to Home screen" in the menu.
+ *
+ * So this module offers a real button where one is possible and accurate
+ * instructions everywhere else — rather than a button that silently does
+ * nothing on the platform most Malaysians actually use.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const Install = {
+  prompt: null,             // the saved beforeinstallprompt event
+
+  /** Already running as an installed app? Then never offer to install it. */
+  isInstalled() {
+    return window.matchMedia('(display-mode: standalone)').matches ||
+           window.navigator.standalone === true ||           // iOS Safari
+           document.referrer.startsWith('android-app://');
+  },
+
+  platform() {
+    const ua = navigator.userAgent;
+    const iOS = /iPad|iPhone|iPod/.test(ua) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (iOS) return /CriOS|FxiOS|EdgiOS/.test(ua) ? 'ios-other' : 'ios-safari';
+    if (/Android/.test(ua)) return /Firefox/.test(ua) ? 'android-firefox' : 'android';
+    if (/Firefox/.test(ua)) return 'desktop-firefox';
+    return 'desktop';
+  },
+
+  init() {
+    // Chromium fires this instead of showing its own banner, and only when the
+    // app passes the installability checks (manifest, icons, service worker,
+    // HTTPS). Saving it is what lets an Install button exist at all.
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      this.prompt = e;
+      this.paint();
+      Telemetry.record('install', { lvl: 'info', msg: 'Install available on this browser' });
+    });
+
+    window.addEventListener('appinstalled', () => {
+      this.prompt = null;
+      this.paint();
+      toast('CuacaMY is on your home screen. Open it from there and it works offline.',
+            'success', { title: 'Installed', ms: 8000 });
+      Telemetry.record('install', { lvl: 'info', msg: 'App installed' });
+    });
+
+    this.paint();
+  },
+
+  /** Show or hide the install controls to match what this browser can do. */
+  paint() {
+    const installed = this.isInstalled();
+    const btn = $('#btn-install');
+    if (btn) btn.hidden = installed;
+
+    const card = $('#install-card');
+    // Dismissing the card is remembered; the top-bar button always remains, so
+    // the choice hides a suggestion rather than removing the feature.
+    if (card) card.hidden = installed || safeLocal.get(LS.installDismissed) === '1';
+
+    const done = $('#install-done');
+    if (done) done.hidden = !installed;
+  },
+
+  /**
+   * One tap where the browser allows it; clear steps where it does not.
+   * The dialog always opens, because "nothing happened" is the worst possible
+   * response to pressing Install.
+   */
+  async run() {
+    if (this.prompt) {
+      const evt = this.prompt;
+      this.prompt = null;                 // a prompt event can only be used once
+      try {
+        evt.prompt();
+        const { outcome } = await evt.userChoice;
+        if (outcome === 'accepted') {
+          Telemetry.record('install', { lvl: 'info', msg: 'Install accepted' });
+          return;                          // appinstalled will confirm it
+        }
+        toast('No problem — you can install it any time from the Install button.', 'info');
+        Telemetry.record('install', { lvl: 'info', msg: 'Install dismissed' });
+      } catch (err) {
+        Telemetry.record('install', { lvl: 'warn', msg: 'Install prompt failed: ' + err.message });
+        this.showSteps();
+      }
+      return;
+    }
+    this.showSteps();
+  },
+
+  /** Per-platform instructions, with only the relevant one visible. */
+  showSteps() {
+    const platform = this.platform();
+    for (const node of $$('[data-platform]')) {
+      node.hidden = node.dataset.platform !== platform;
+    }
+    const heading = $('#install-steps-title');
+    if (heading) heading.textContent = INSTALL_TITLES[platform] || 'Add CuacaMY to your device';
+    $('#install-dialog').showModal();
+  }
+};
+
+const INSTALL_TITLES = {
+  'ios-safari':      'Add CuacaMY to your iPhone or iPad',
+  'ios-other':       'Open this page in Safari first',
+  'android':         'Add CuacaMY to your Android home screen',
+  'android-firefox': 'Add CuacaMY to your Android home screen',
+  'desktop':         'Install CuacaMY on this computer',
+  'desktop-firefox': 'Firefox cannot install web apps'
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
  * 24 · BOOT
  * ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -7363,6 +7516,7 @@ async function boot() {
   applyUnits();
   wireEvents();
   registerServiceWorker();
+  Install.init();
 
   $('#foot-version').textContent = 'v' + VERSION;
   $('#banner-offline').hidden = navigator.onLine;

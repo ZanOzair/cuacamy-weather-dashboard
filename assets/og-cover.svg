@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#070b17"/><stop offset="1" stop-color="#102a52"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.82" cy="0.18" r="0.5">
+      <stop offset="0" stop-color="#ff9f1c" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#ff9f1c" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd76f"/><stop offset="1" stop-color="#ff9a3c"/>
+    </linearGradient>
+    <linearGradient id="cl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f8fbff"/><stop offset="1" stop-color="#b9c6e4"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <g transform="translate(880 300) scale(3.2)">
+    <circle cx="18" cy="-10" r="26" fill="url(#sun)" opacity=".95"/>
+    <path d="M32 40H-14a22 22 0 0 1-2.4-43.8A30 30 0 0 1 42 8.6 18.5 18.5 0 0 1 32 40z" fill="url(#cl)"/>
+  </g>
+  <text x="90" y="250" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="84" font-weight="700" fill="#e8eeff">Cuaca<tspan fill="#ffc857">MY</tspan></text>
+  <text x="92" y="315" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="34" fill="#9aa8c7">Malaysia Weather Dashboard</text>
+  <text x="92" y="400" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="25" fill="#7cc6ff">Vanilla HTML · CSS · JavaScript — no frameworks, no build step</text>
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="22" fill="#9aa8c7">
+    <text x="92" y="470">5-day forecast</text>
+    <text x="290" y="470">Air quality</text>
+    <text x="450" y="470">Waze &amp; Google Maps</text>
+    <text x="710" y="470">Accounts</text>
+    <text x="850" y="470">Offline PWA</text>
+  </g>
+  <rect x="90" y="510" width="330" height="6" rx="3" fill="#1e86f0"/>
+</svg>

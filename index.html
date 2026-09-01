@@ -1,0 +1,1429 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CuacaMY — Malaysia Weather Dashboard</title>
+<meta name="description" content="A fast, offline-capable weather dashboard for every state and town in Malaysia. Live conditions, 5-day forecast, air quality, Waze &amp; Google Maps navigation, accounts and performance analytics.">
+<meta name="theme-color" content="#0b1020">
+<meta name="color-scheme" content="dark light">
+
+<!-- Strict Content Security Policy. No inline scripts or inline styles are used
+     anywhere in this project; dynamic styling goes through CSSOM (element.style
+     .setProperty) which CSP permits, while `style="…"` attributes do not.
+     `frame-ancestors` is deliberately absent: browsers ignore it in a <meta>
+     tag, so clickjacking protection belongs in an HTTP response header. See
+     the deployment notes in README.md. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'self';
+  base-uri 'none';
+  object-src 'none';
+  form-action 'none';
+  img-src 'self' data: blob: https://lh3.googleusercontent.com;
+  font-src 'self';
+  style-src 'self';
+  script-src 'self' https://www.gstatic.com https://accounts.google.com;
+  connect-src 'self'
+    https://api.open-meteo.com
+    https://air-quality-api.open-meteo.com
+    https://geocoding-api.open-meteo.com
+    https://flood-api.open-meteo.com
+    https://archive-api.open-meteo.com
+    https://earthquake.usgs.gov
+    https://api.bigdatacloud.net
+    https://api.openweathermap.org
+    https://www.gstatic.com
+    https://identitytoolkit.googleapis.com
+    https://securetoken.googleapis.com
+    https://firestore.googleapis.com
+    https://firebaseinstallations.googleapis.com
+    https://accounts.google.com
+    https://oauth2.googleapis.com;
+  frame-src https://accounts.google.com https://*.firebaseapp.com;
+  manifest-src 'self';
+  worker-src 'self';
+">
+
+<!-- Social preview -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="CuacaMY — Malaysia Weather Dashboard">
+<meta property="og:description" content="Live weather, 5-day forecast and air quality for every state in Malaysia. Vanilla HTML, CSS and JavaScript.">
+<meta property="og:image" content="./assets/og-cover.svg">
+
+<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./assets/icon-192.png">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="preconnect" href="https://api.open-meteo.com" crossorigin>
+<link rel="preconnect" href="https://air-quality-api.open-meteo.com" crossorigin>
+<link rel="preconnect" href="https://api.openweathermap.org" crossorigin>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     ICON SPRITE
+     Every icon in the app is a hand-authored SVG symbol, so the dashboard has
+     zero external image requests and renders identically offline.
+     ══════════════════════════════════════════════════════════════════════════ -->
+<svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g-sun" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd76f"/><stop offset="1" stop-color="#ff9a3c"/>
+    </linearGradient>
+    <linearGradient id="g-moon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e8efff"/><stop offset="1" stop-color="#9fb4e8"/>
+    </linearGradient>
+    <linearGradient id="g-cloud" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2f6ff"/><stop offset="1" stop-color="#b9c6e4"/>
+    </linearGradient>
+    <linearGradient id="g-storm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fa3c8"/><stop offset="1" stop-color="#5a6c92"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Weather symbols (64×64 viewBox) -->
+  <symbol id="wx-clear-day" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="13" fill="url(#g-sun)"/>
+    <g stroke="url(#g-sun)" stroke-width="4" stroke-linecap="round">
+      <path d="M32 6v8M32 50v8M6 32h8M50 32h8M13.6 13.6l5.7 5.7M44.7 44.7l5.7 5.7M50.4 13.6l-5.7 5.7M19.3 44.7l-5.7 5.7"/>
+    </g>
+  </symbol>
+  <symbol id="wx-clear-night" viewBox="0 0 64 64">
+    <path d="M42 8a24 24 0 1 0 14 30A20 20 0 0 1 42 8z" fill="url(#g-moon)"/>
+    <circle cx="18" cy="16" r="1.8" fill="#e8efff"/><circle cx="52" cy="14" r="1.2" fill="#e8efff"/>
+  </symbol>
+  <symbol id="wx-partly-day" viewBox="0 0 64 64">
+    <circle cx="23" cy="23" r="10" fill="url(#g-sun)"/>
+    <g stroke="url(#g-sun)" stroke-width="3.4" stroke-linecap="round">
+      <path d="M23 4v6M4 23h6M9.9 9.9l4.2 4.2M36.1 9.9l-4.2 4.2"/>
+    </g>
+    <path d="M44 54H22a11 11 0 0 1-1.2-21.9A15 15 0 0 1 49 35.4 9.3 9.3 0 0 1 44 54z" fill="url(#g-cloud)"/>
+  </symbol>
+  <symbol id="wx-partly-night" viewBox="0 0 64 64">
+    <path d="M32 6a16 16 0 1 0 9.5 20A13.4 13.4 0 0 1 32 6z" fill="url(#g-moon)"/>
+    <path d="M44 54H22a11 11 0 0 1-1.2-21.9A15 15 0 0 1 49 35.4 9.3 9.3 0 0 1 44 54z" fill="url(#g-cloud)"/>
+  </symbol>
+  <symbol id="wx-cloudy" viewBox="0 0 64 64">
+    <path d="M42 52H20a12 12 0 0 1-1.3-23.9A16 16 0 0 1 48 32.2 10 10 0 0 1 42 52z" fill="url(#g-cloud)"/>
+  </symbol>
+  <symbol id="wx-overcast" viewBox="0 0 64 64">
+    <path d="M46 26a13 13 0 0 0-24-4 9 9 0 0 0-8 9h32z" fill="#9fb0d0"/>
+    <path d="M42 54H20a12 12 0 0 1-1.3-23.9A16 16 0 0 1 48 34.2 10 10 0 0 1 42 54z" fill="url(#g-cloud)"/>
+  </symbol>
+  <symbol id="wx-rain" viewBox="0 0 64 64">
+    <path d="M42 42H20a12 12 0 0 1-1.3-23.9A16 16 0 0 1 48 22.2 10 10 0 0 1 42 42z" fill="url(#g-cloud)"/>
+    <g stroke="#5aa9ff" stroke-width="3.6" stroke-linecap="round">
+      <path d="M22 47l-3 8M33 47l-3 8M44 47l-3 8"/>
+    </g>
+  </symbol>
+  <symbol id="wx-showers" viewBox="0 0 64 64">
+    <path d="M42 40H20a12 12 0 0 1-1.3-23.9A16 16 0 0 1 48 20.2 10 10 0 0 1 42 40z" fill="url(#g-cloud)"/>
+    <g stroke="#5aa9ff" stroke-width="3.6" stroke-linecap="round">
+      <path d="M20 45l-4 11M31 45l-4 11M42 45l-4 11M49 45l-3 7"/>
+    </g>
+  </symbol>
+  <symbol id="wx-thunder" viewBox="0 0 64 64">
+    <path d="M42 38H20a12 12 0 0 1-1.3-23.9A16 16 0 0 1 48 18.2 10 10 0 0 1 42 38z" fill="url(#g-storm)"/>
+    <path d="M34 38l-12 16h8l-4 12 15-18h-9l6-10z" fill="#ffd34d"/>
+  </symbol>
+  <symbol id="wx-snow" viewBox="0 0 64 64">
+    <path d="M42 40H20a12 12 0 0 1-1.3-23.9A16 16 0 0 1 48 20.2 10 10 0 0 1 42 40z" fill="url(#g-cloud)"/>
+    <g stroke="#cfe6ff" stroke-width="3" stroke-linecap="round">
+      <path d="M22 46v10M17.5 48.5l9 5M26.5 48.5l-9 5M42 46v10M37.5 48.5l9 5M46.5 48.5l-9 5"/>
+    </g>
+  </symbol>
+  <symbol id="wx-mist" viewBox="0 0 64 64">
+    <g stroke="#c3d0ea" stroke-width="4.4" stroke-linecap="round">
+      <path d="M12 22h34M18 32h32M10 42h30M22 52h30"/>
+    </g>
+  </symbol>
+
+  <!-- UI symbols (24×24 viewBox) -->
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 1 1-4.9 13.2l-2.9 2.9a1 1 0 0 1-1.4-1.4l2.9-2.9A7.5 7.5 0 0 1 10.5 3zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11z"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 1 7 7c0 5-7 13-7 13S5 14 5 9a7 7 0 0 1 7-7zm0 4.5A2.5 2.5 0 1 0 12 11a2.5 2.5 0 0 0 0-4.5z"/></symbol>
+  <symbol id="i-crosshair" viewBox="0 0 24 24"><path d="M12 1a1 1 0 0 1 1 1v1.06A9 9 0 0 1 20.94 11H22a1 1 0 1 1 0 2h-1.06A9 9 0 0 1 13 20.94V22a1 1 0 1 1-2 0v-1.06A9 9 0 0 1 3.06 13H2a1 1 0 1 1 0-2h1.06A9 9 0 0 1 11 3.06V2a1 1 0 0 1 1-1zm0 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm0 4a3 3 0 1 1 0 6 3 3 0 0 1 0-6z"/></symbol>
+  <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 2.6l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.4 6.2 20.5l1.1-6.5L2.6 9.4l6.5-.9L12 2.6z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M12 3a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 11c4.4 0 8 2.4 8 5.4V21H4v-1.6C4 16.4 7.6 14 12 14z"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20a1 1 0 0 1-1-1V4a1 1 0 1 1 2 0v14h15a1 1 0 1 1 0 2H4zm3.7-4.3a1 1 0 0 1-.4-1.9L11 12l3.2-4.6a1 1 0 0 1 1.5-.2l4 3.4a1 1 0 1 1-1.3 1.5L15.2 9.5 12 14a1 1 0 0 1-.5.4l-3.5 1.2a1 1 0 0 1-.3.1z"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM10.6 2h2.8l.4 2.4c.6.2 1.1.5 1.6.8l2.2-1 1.4 2.4-1.8 1.6c.1.6.1 1.2 0 1.8l1.8 1.6-1.4 2.4-2.2-1c-.5.3-1 .6-1.6.8l-.4 2.4h-2.8l-.4-2.4a6.6 6.6 0 0 1-1.6-.8l-2.2 1L3 15.6l1.8-1.6a6.9 6.9 0 0 1 0-1.8L3 10.6 4.4 8.2l2.2 1c.5-.3 1-.6 1.6-.8L10.6 2z"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.4 5a1 1 0 0 0-1.4 1.4L10.6 12 5 17.6A1 1 0 0 0 6.4 19L12 13.4 17.6 19a1 1 0 0 0 1.4-1.4L13.4 12 19 6.4A1 1 0 0 0 17.6 5L12 10.6 6.4 5z"/></symbol>
+  <symbol id="i-sun-ui" viewBox="0 0 24 24"><path d="M12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-15a1 1 0 0 1 1 1v1.5a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1zm0 17a1 1 0 0 1 1 1V21a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1zM2 12a1 1 0 0 1 1-1h1.5a1 1 0 1 1 0 2H3a1 1 0 0 1-1-1zm17.5-1H21a1 1 0 1 1 0 2h-1.5a1 1 0 1 1 0-2zM4.9 4.9a1 1 0 0 1 1.4 0l1 1a1 1 0 0 1-1.4 1.4l-1-1a1 1 0 0 1 0-1.4zm11.8 11.8a1 1 0 0 1 1.4 0l1 1a1 1 0 0 1-1.4 1.4l-1-1a1 1 0 0 1 0-1.4zm2.4-11.8a1 1 0 0 1 0 1.4l-1 1a1 1 0 0 1-1.4-1.4l1-1a1 1 0 0 1 1.4 0zM6.3 16.7a1 1 0 0 1 0 1.4l-1 1a1 1 0 0 1-1.4-1.4l1-1a1 1 0 0 1 1.4 0z"/></symbol>
+  <symbol id="i-moon-ui" viewBox="0 0 24 24"><path d="M20.7 14.5A9 9 0 0 1 9.5 3.3 9 9 0 1 0 20.7 14.5z"/></symbol>
+  <symbol id="i-nav" viewBox="0 0 24 24"><path d="M21.4 3.1a1 1 0 0 0-1.2-1.2L3 7.4a1 1 0 0 0-.1 1.9l7 2.9 2.9 7a1 1 0 0 0 1.9-.1l5.5-17z"/></symbol>
+  <symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 2.7s6.5 7.1 6.5 11.4a6.5 6.5 0 1 1-13 0C5.5 9.8 12 2.7 12 2.7z"/></symbol>
+  <symbol id="i-wind" viewBox="0 0 24 24"><path d="M3 8h10a2.5 2.5 0 1 0-2.5-2.5 1 1 0 1 1-2 0A4.5 4.5 0 1 1 13 10H3a1 1 0 1 1 0-2zm0 5h14a4.5 4.5 0 1 1-4.5 4.5 1 1 0 1 1 2 0A2.5 2.5 0 1 0 17 15H3a1 1 0 1 1 0-2z"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M12 4a9 9 0 0 1 8.5 12 1 1 0 0 1-1.9-.6A7 7 0 1 0 5.4 15.4 1 1 0 1 1 3.5 16 9 9 0 0 1 12 4zm3.5 4.6a1 1 0 0 1 .2 1.4l-2.7 3.6a2 2 0 1 1-1.6-1.2l2.7-3.6a1 1 0 0 1 1.4-.2z"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M12 5c5 0 9.3 3.4 11 7-1.7 3.6-6 7-11 7S2.7 15.6 1 12c1.7-3.6 6-7 11-7zm0 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/></symbol>
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M20 3c0 9-5 15-13 15H4c0-9 5-14 13-14h3zM5 21a1 1 0 0 1-.9-1.4C5.6 15.9 8.6 13 12.5 11.4a1 1 0 0 1 .8 1.8C9.9 14.6 7.3 17.1 6 20.4A1 1 0 0 1 5 21z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm1 4h-2v7l5.2 3.1 1-1.7L13 12V6z"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><path d="M3 5h18a1 1 0 0 1 1 1v.4l-10 5.6L2 6.4V6a1 1 0 0 1 1-1zM2 8.7l9.5 5.3a1 1 0 0 0 1 0L22 8.7V18a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V8.7z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M12 4a8 8 0 0 1 7 4.1V6a1 1 0 1 1 2 0v5a1 1 0 0 1-1 1h-5a1 1 0 1 1 0-2h2.5A6 6 0 0 0 6.2 12a1 1 0 1 1-2 0A8 8 0 0 1 12 4zm7.8 8a1 1 0 0 1 1 1 8 8 0 0 1-14.8 4.1V19a1 1 0 1 1-2 0v-5a1 1 0 0 1 1-1h5a1 1 0 1 1 0 2H7.5A6 6 0 0 0 18.8 13a1 1 0 0 1 1-1z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M9 3h6a1 1 0 0 1 1 1v1h4a1 1 0 1 1 0 2h-1v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7H4a1 1 0 0 1 0-2h4V4a1 1 0 0 1 1-1zm1 6v9h2V9h-2zm4 0v9h2V9h-2z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3a1 1 0 0 1 1 1v9.6l3.3-3.3a1 1 0 0 1 1.4 1.4l-5 5a1 1 0 0 1-1.4 0l-5-5a1 1 0 1 1 1.4-1.4L11 13.6V4a1 1 0 0 1 1-1zM4 19h16a1 1 0 1 1 0 2H4a1 1 0 1 1 0-2z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 2l8 3.5v6c0 5-3.4 9.4-8 10.5-4.6-1.1-8-5.5-8-10.5v-6L12 2zm-1.1 13.6l5.3-5.3-1.4-1.4-3.9 3.9-1.8-1.8-1.4 1.4 3.2 3.2z"/></symbol>
+  <symbol id="i-quake" viewBox="0 0 24 24"><path d="M2 12h3.2l2-6.4a1 1 0 0 1 1.9 0L12 15l2.4-6.2a1 1 0 0 1 1.9.1L17.8 12H22v2h-4.9a1 1 0 0 1-1-.7l-.7-2.2-2.5 6.5a1 1 0 0 1-1.9 0L8 8.8l-1.2 3.9a1 1 0 0 1-1 .7H2v-1.4z"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zm12 8H5v9h14v-9z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 2a6 6 0 0 1 6 6v3.6l1.7 3.1A1 1 0 0 1 18.8 16H5.2a1 1 0 0 1-.9-1.3L6 11.6V8a6 6 0 0 1 6-6zm0 20a3 3 0 0 1-2.8-2h5.6A3 3 0 0 1 12 22z"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9L12 2zm7 11l.9 2.6 2.6.9-2.6.9L19 20l-.9-2.6-2.6-.9 2.6-.9L19 13zM5.5 14l.7 2.1 2.1.7-2.1.7L5.5 20l-.7-2.5-2.1-.7 2.1-.7L5.5 14z"/></symbol>
+  <symbol id="i-share-ios" viewBox="0 0 24 24"><path d="M12 2.6a1 1 0 0 1 .7.3l3.5 3.5a1 1 0 0 1-1.4 1.4L13 5.99V15a1 1 0 1 1-2 0V6l-1.8 1.8a1 1 0 0 1-1.4-1.4l3.5-3.5a1 1 0 0 1 .7-.3zM5 11a1 1 0 0 1 1 1v7h12v-7a1 1 0 1 1 2 0v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z"/></symbol>
+  <symbol id="i-plus-square" viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm6 5v3H8a1 1 0 1 0 0 2h3v3a1 1 0 1 0 2 0v-3h3a1 1 0 1 0 0-2h-3V8a1 1 0 1 0-2 0z"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><path d="M12 4.5a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6zm0 5.7a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6zm0 5.7a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm0 8a1 1 0 0 0-1 1v6a1 1 0 1 0 2 0v-6a1 1 0 0 0-1-1zm0-4.4a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20zm4.7 6.3a1 1 0 0 0-1.4 0L10.8 12.8l-2.1-2.1a1 1 0 1 0-1.4 1.4l2.8 2.8a1 1 0 0 0 1.4 0l5.2-5.2a1 1 0 0 0 0-1.4z"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 2.6a1.6 1.6 0 0 1 1.4.8l8.3 14.4a1.6 1.6 0 0 1-1.4 2.4H3.7a1.6 1.6 0 0 1-1.4-2.4L10.6 3.4a1.6 1.6 0 0 1 1.4-.8zm0 5.4a1 1 0 0 0-1 1v4.6a1 1 0 1 0 2 0V9a1 1 0 0 0-1-1zm0 8a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4z"/></symbol>
+  <symbol id="i-siren" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 1 6 6v6H6V9a6 6 0 0 1 6-6zm-9 14h18a1 1 0 0 1 0 2H3a1 1 0 1 1 0-2zm9-16a1 1 0 0 1 1 1v.6a1 1 0 1 1-2 0V2a1 1 0 0 1 1-1zM4.2 4.2a1 1 0 0 1 1.4 0l.5.5A1 1 0 0 1 4.7 6l-.5-.4a1 1 0 0 1 0-1.4zm15.6 0a1 1 0 0 1 0 1.4l-.5.4A1 1 0 0 1 17.9 4.7l.5-.5a1 1 0 0 1 1.4 0z"/></symbol>
+  <symbol id="i-database" viewBox="0 0 24 24"><path d="M12 2c4.4 0 8 1.35 8 3v2c0 1.65-3.6 3-8 3s-8-1.35-8-3V5c0-1.65 3.6-3 8-3zm8 7.6V13c0 1.65-3.6 3-8 3s-8-1.35-8-3V9.6c1.7 1.2 4.8 1.8 8 1.8s6.3-.6 8-1.8zm0 6V19c0 1.65-3.6 3-8 3s-8-1.35-8-3v-3.4c1.7 1.2 4.8 1.8 8 1.8s6.3-.6 8-1.8z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><path d="M6.6 2.8a1.6 1.6 0 0 1 2.2.5l1.7 2.7a1.6 1.6 0 0 1-.3 2.1L8.9 9.2a11.6 11.6 0 0 0 5.9 5.9l1.1-1.3a1.6 1.6 0 0 1 2.1-.3l2.7 1.7a1.6 1.6 0 0 1 .5 2.2l-1.2 1.9a2.6 2.6 0 0 1-2.9 1.1C11 18.8 5.2 13 3.6 6.9a2.6 2.6 0 0 1 1.1-2.9l1.9-1.2z"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 3h7v7a1 1 0 1 1-2 0V6.4l-7.3 7.3a1 1 0 0 1-1.4-1.4L17.6 5H14a1 1 0 1 1 0-2zM5 5h5a1 1 0 1 1 0 2H6v11h11v-4a1 1 0 1 1 2 0v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/></symbol>
+  <symbol id="i-building" viewBox="0 0 24 24"><path d="M4 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v4h4a1 1 0 0 1 1 1v12h-6v-4h-4v4H4zm3-14v2h2V7H7zm4 0v2h2V7h-2zm-4 4v2h2v-2H7zm4 0v2h2v-2h-2zm6 0v2h2v-2h-2zm-6 4v2h2v-2h-2zm-4 0v2h2v-2H7zm10 0v2h2v-2h-2z"/></symbol>
+  <symbol id="i-google" viewBox="0 0 24 24"><path d="M21.6 12.2c0-.7-.06-1.35-.18-2H12v3.8h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.75 3-4.3 3-7.3z" fill="#4285F4"/><path d="M12 22c2.7 0 4.96-.9 6.6-2.4l-3.2-2.5c-.9.6-2.05.95-3.4.95-2.6 0-4.8-1.75-5.6-4.1H3.1v2.6A10 10 0 0 0 12 22z" fill="#34A853"/><path d="M6.4 13.95a6 6 0 0 1 0-3.9V7.45H3.1a10 10 0 0 0 0 9.1l3.3-2.6z" fill="#FBBC05"/><path d="M12 5.95c1.47 0 2.79.5 3.83 1.5l2.84-2.84C16.95 2.99 14.7 2 12 2A10 10 0 0 0 3.1 7.45l3.3 2.6C7.2 7.7 9.4 5.95 12 5.95z" fill="#EA4335"/></symbol>
+</svg>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TOP BAR
+     ══════════════════════════════════════════════════════════════════════════ -->
+<header class="topbar">
+  <div class="topbar__inner">
+
+    <a class="brand" href="./" aria-label="CuacaMY home">
+      <span class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64"><use href="#wx-partly-day"></use></svg>
+      </span>
+      <span class="brand__text">
+        <strong>Cuaca<span class="brand__accent">MY</span></strong>
+        <small>Malaysia Weather Dashboard</small>
+      </span>
+    </a>
+
+    <!-- Search: an accessible combobox (WAI-ARIA 1.2 pattern) -->
+    <div class="search" role="search">
+      <div class="search__field">
+        <svg class="search__icon" aria-hidden="true" viewBox="0 0 24 24"><use href="#i-search"></use></svg>
+        <input
+          id="search-input"
+          class="search__input"
+          type="search"
+          role="combobox"
+          placeholder="Search any city — try “Kota Bharu” or “Tokyo”"
+          autocomplete="off"
+          autocorrect="off"
+          spellcheck="false"
+          aria-label="Search for a city"
+          aria-expanded="false"
+          aria-controls="search-results"
+          aria-autocomplete="list">
+        <button id="search-clear" class="search__clear" type="button" aria-label="Clear search" hidden>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"></use></svg>
+        </button>
+        <span class="search__spinner" id="search-spinner" hidden aria-hidden="true"></span>
+      </div>
+      <ul id="search-results" class="search__results" role="listbox" aria-label="City suggestions" hidden></ul>
+    </div>
+
+    <div class="topbar__actions">
+      <button id="btn-geo" class="icon-btn" type="button" title="Use my current location" aria-label="Use my current location">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-crosshair"></use></svg>
+      </button>
+      <button id="btn-units" class="unit-toggle" type="button" aria-label="Toggle temperature units" title="Switch between Celsius and Fahrenheit">
+        <span class="unit-toggle__opt is-active" data-unit="metric">°C</span>
+        <span class="unit-toggle__opt" data-unit="imperial">°F</span>
+      </button>
+      <button id="btn-theme" class="icon-btn" type="button" title="Toggle light / dark theme" aria-label="Toggle light or dark theme">
+        <svg class="icon-theme-dark" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-moon-ui"></use></svg>
+        <svg class="icon-theme-light" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sun-ui"></use></svg>
+      </button>
+      <button id="btn-install" class="btn btn--install" type="button" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg>
+        <span>Install app</span>
+      </button>
+      <div class="notif-wrap">
+        <button id="btn-notif" class="icon-btn" type="button" title="Notifications"
+                aria-label="Notifications" aria-expanded="false" aria-controls="notif-panel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bell"></use></svg>
+          <span id="notif-count" class="notif-badge" aria-hidden="true" hidden>0</span>
+        </button>
+        <div id="notif-panel" class="notif-panel" role="dialog" aria-label="Notifications" hidden>
+          <div class="notif-panel__head">
+            <strong>Notifications</strong>
+            <button id="btn-notif-clear" class="btn btn--ghost btn--sm" type="button">Clear all</button>
+          </div>
+          <ul id="notif-list" class="notif-list"></ul>
+          <div class="notif-panel__foot">
+            <button id="btn-notif-enable" class="btn btn--ghost btn--sm" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bell"></use></svg>
+              Enable device alerts
+            </button>
+          </div>
+        </div>
+      </div>
+      <button id="btn-settings" class="icon-btn" type="button" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-gear"></use></svg>
+      </button>
+      <button id="btn-account" class="account-btn" type="button" aria-label="Account">
+        <span class="avatar" id="account-avatar" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><use href="#i-user"></use></svg>
+        </span>
+        <span class="account-btn__label" id="account-label">Sign in</span>
+      </button>
+    </div>
+  </div>
+
+  <nav class="tabs" aria-label="Sections">
+    <div class="tabs__inner" role="tablist">
+      <button class="tab is-active" role="tab" id="tab-dashboard" aria-controls="view-dashboard" aria-selected="true" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#wx-partly-day"></use></svg> Dashboard
+      </button>
+      <button class="tab" role="tab" id="tab-alerts" aria-controls="view-alerts" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-shield"></use></svg> Alerts
+        <span class="tab__count" id="tab-alerts-count" hidden></span>
+      </button>
+      <button class="tab" role="tab" id="tab-climate" aria-controls="view-climate" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-calendar"></use></svg> Season &amp; climate
+      </button>
+      <button class="tab" role="tab" id="tab-explore" aria-controls="view-explore" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pin"></use></svg> Explore Malaysia
+      </button>
+      <button class="tab" role="tab" id="tab-analytics" aria-controls="view-analytics" aria-selected="false" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chart"></use></svg> Weather analysis
+      </button>
+    </div>
+  </nav>
+</header>
+
+<!-- Connectivity / configuration banners -->
+<div id="banner-offline" class="banner banner--warn" role="status" hidden>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-wind"></use></svg>
+  You are offline — showing the last data cached on this device.
+</div>
+<div id="banner-geo" class="banner banner--geo" role="status" hidden>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-crosshair"></use></svg>
+  <span>Show the weather and hazard alerts for exactly where you are?</span>
+  <button class="banner__cta" id="banner-geo-yes" type="button">Use my location</button>
+  <button class="banner__dismiss" id="banner-geo-no" type="button" aria-label="Dismiss">Not now</button>
+</div>
+<div id="banner-setup" class="banner banner--info" role="status" hidden>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-gear"></use></svg>
+  <span id="banner-setup-text">Live data is unreachable, so the dashboard is showing a bundled offline estimate.</span>
+  <button class="banner__cta" id="banner-setup-cta" type="button">Settings</button>
+</div>
+
+<main id="main" class="main">
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       VIEW · DASHBOARD
+       ════════════════════════════════════════════════════════════════════════ -->
+  <section id="view-dashboard" class="view is-active" role="tabpanel" aria-labelledby="tab-dashboard" tabindex="-1">
+
+    <!-- Place header -->
+    <div class="place" id="place-head">
+      <div class="place__main">
+        <h1 class="place__name" id="place-name">Loading…</h1>
+        <p class="place__meta">
+          <span id="place-region" class="place__region"></span>
+          <span class="dot" aria-hidden="true">•</span>
+          <span id="place-time" class="place__time"></span>
+          <span class="dot" aria-hidden="true">•</span>
+          <span id="place-coords" class="place__coords"></span>
+        </p>
+      </div>
+      <div class="place__actions">
+        <button id="btn-fav" class="chip chip--fav" type="button" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-star"></use></svg>
+          <span id="btn-fav-label">Save</span>
+        </button>
+        <a id="link-waze" class="chip chip--waze" href="#" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-nav"></use></svg> Waze
+        </a>
+        <a id="link-gmaps" class="chip chip--gmaps" href="#" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pin"></use></svg> Google Maps
+        </a>
+        <button id="btn-email" class="chip" type="button" title="Email this weather report">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mail"></use></svg> Email report
+        </button>
+        <button id="btn-refresh" class="icon-btn icon-btn--sm" type="button" title="Refresh data" aria-label="Refresh data">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-refresh"></use></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Error state -->
+    <div id="error-box" class="error-box" role="alert" hidden>
+      <h2 id="error-title">Something went wrong</h2>
+      <p id="error-msg"></p>
+      <button id="error-retry" class="btn btn--primary" type="button">Try again</button>
+    </div>
+
+    <div class="hazard-strip" id="hazard-strip" data-tone="clear" role="status" aria-live="polite"></div>
+
+    <div class="grid" id="dash-grid">
+
+      <!-- Current conditions -->
+      <article class="card card--hero" aria-labelledby="h-current">
+        <h2 class="card__title" id="h-current">Current conditions</h2>
+        <div class="hero">
+          <div class="hero__icon">
+            <svg id="cur-icon" viewBox="0 0 64 64" role="img" aria-labelledby="cur-desc"><use href="#wx-clear-day"></use></svg>
+          </div>
+          <div class="hero__readout">
+            <p class="hero__temp"><span id="cur-temp" data-skeleton>--</span><span class="hero__deg" id="cur-unit">°C</span></p>
+            <p class="hero__desc" id="cur-desc" data-skeleton>—</p>
+            <p class="hero__feels">Feels like <strong id="cur-feels">--°</strong></p>
+          </div>
+          <dl class="hero__range">
+            <div><dt>High</dt><dd id="cur-hi">--°</dd></div>
+            <div><dt>Low</dt><dd id="cur-lo">--°</dd></div>
+            <div><dt>Sunrise</dt><dd id="cur-sunrise">--:--</dd></div>
+            <div><dt>Sunset</dt><dd id="cur-sunset">--:--</dd></div>
+          </dl>
+        </div>
+        <p class="hero__updated">Updated <span id="cur-updated">—</span> <span id="cur-source" class="tag"></span></p>
+      </article>
+
+      <!-- Metric tiles -->
+      <article class="card card--metrics" aria-labelledby="h-metrics">
+        <h2 class="card__title" id="h-metrics">Atmosphere</h2>
+        <ul class="metrics">
+          <li class="metric">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-drop"></use></svg>
+            <span class="metric__label">Humidity</span>
+            <span class="metric__value" id="m-humidity">--%</span>
+            <span class="meter"><span class="meter__fill" id="m-humidity-bar"></span></span>
+          </li>
+          <li class="metric">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-wind"></use></svg>
+            <span class="metric__label">Wind</span>
+            <span class="metric__value" id="m-wind">-- km/h</span>
+            <span class="metric__sub" id="m-wind-dir">—</span>
+          </li>
+          <li class="metric">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-gauge"></use></svg>
+            <span class="metric__label">Pressure</span>
+            <span class="metric__value" id="m-pressure">-- hPa</span>
+            <span class="metric__sub" id="m-pressure-trend">—</span>
+          </li>
+          <li class="metric">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-eye"></use></svg>
+            <span class="metric__label">Visibility</span>
+            <span class="metric__value" id="m-visibility">-- km</span>
+          </li>
+          <li class="metric">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><use href="#wx-cloudy"></use></svg>
+            <span class="metric__label">Cloud cover</span>
+            <span class="metric__value" id="m-clouds">--%</span>
+            <span class="meter"><span class="meter__fill" id="m-clouds-bar"></span></span>
+          </li>
+          <li class="metric">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-drop"></use></svg>
+            <span class="metric__label">Dew point</span>
+            <span class="metric__value" id="m-dew">--°</span>
+            <span class="metric__sub" id="m-comfort">—</span>
+          </li>
+        </ul>
+      </article>
+
+      <!-- Air quality -->
+      <article class="card card--aqi" aria-labelledby="h-aqi">
+        <h2 class="card__title" id="h-aqi">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-leaf"></use></svg> Air quality
+        </h2>
+        <div class="aqi">
+          <div class="aqi__badge" id="aqi-badge" data-level="0">
+            <span class="aqi__score" id="aqi-score">—</span>
+            <span class="aqi__label" id="aqi-label">No data</span>
+          </div>
+          <ul class="aqi__pollutants" id="aqi-pollutants"></ul>
+        </div>
+        <p class="aqi__note" id="aqi-note"></p>
+      </article>
+
+      <!-- Hourly chart -->
+      <article class="card card--hourly" aria-labelledby="h-hourly">
+        <div class="card__head">
+          <h2 class="card__title" id="h-hourly">Next 24 hours</h2>
+          <div class="seg" role="group" aria-label="Hourly chart series">
+            <button class="seg__btn is-active" type="button" data-series="temp">Temperature</button>
+            <button class="seg__btn" type="button" data-series="pop">Rain chance</button>
+            <button class="seg__btn" type="button" data-series="wind">Wind</button>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="hourly-chart" role="img" aria-label="Hourly forecast chart"></canvas>
+        </div>
+        <p class="sr-only" id="hourly-table-summary"></p>
+      </article>
+
+      <!-- 5-day forecast -->
+      <article class="card card--forecast" aria-labelledby="h-forecast">
+        <div class="card__head">
+          <h2 class="card__title" id="h-forecast">5-day forecast</h2>
+          <span class="card__hint">Tap a day for the hourly breakdown</span>
+        </div>
+        <div class="forecast" id="forecast-list"></div>
+        <div class="daybreak" id="daybreak" hidden>
+          <div class="daybreak__head">
+            <h3 id="daybreak-title">—</h3>
+            <button class="icon-btn icon-btn--sm" id="daybreak-close" type="button" aria-label="Close day details">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"></use></svg>
+            </button>
+          </div>
+          <div class="daybreak__slots" id="daybreak-slots"></div>
+        </div>
+      </article>
+
+      <!-- Analytical assistant -->
+      <article class="card card--assistant" aria-labelledby="h-assistant">
+        <div class="card__head">
+          <h2 class="card__title" id="h-assistant">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-sparkle"></use></svg> Ask about this place
+          </h2>
+          <span class="card__hint">Answers computed on your device</span>
+        </div>
+
+        <p class="assistant__briefing" id="assistant-briefing">Load a location to get a briefing.</p>
+
+        <div class="ask-chips" id="assistant-chips"></div>
+
+        <div class="assistant__log" id="assistant-log" role="log" aria-live="polite">
+          <p class="empty" id="assistant-empty">Ask a question, or tap one of the suggestions above.</p>
+        </div>
+
+        <form class="assistant__form" id="assistant-form">
+          <label class="sr-only" for="assistant-input">Ask a question about the weather here</label>
+          <input class="input" id="assistant-input" type="text" autocomplete="off"
+                 placeholder="e.g. will it rain this afternoon?">
+          <button class="btn btn--primary" type="submit">Ask</button>
+        </form>
+      </article>
+
+      <!-- Install prompt -->
+      <article class="card card--install" id="install-card" aria-labelledby="h-install">
+        <div class="install-card__body">
+          <h2 class="card__title" id="h-install">Keep CuacaMY on your phone</h2>
+          <p>
+            Add it to your home screen and it opens like any other app — full screen, one tap,
+            and it still shows your last readings when you have no signal. Nothing to download
+            from a store, no account needed, about 1 MB.
+          </p>
+          <button class="btn btn--primary" id="install-card-cta" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg>
+            Install CuacaMY
+          </button>
+          <button class="btn btn--ghost btn--sm" id="install-card-dismiss" type="button">Not now</button>
+        </div>
+      </article>
+
+      <p class="card card--installed" id="install-done" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"></use></svg>
+        You are running the installed app. It works offline and updates itself.
+      </p>
+
+      <!-- Saved places -->
+      <article class="card card--saved" aria-labelledby="h-saved">
+        <div class="card__head">
+          <h2 class="card__title" id="h-saved">Saved places</h2>
+          <span class="card__hint" id="saved-sync">Stored on this device</span>
+        </div>
+        <p class="card__lede">
+          Pin the places you check often — home, work, your parents’ town — and switch between
+          them in one tap instead of searching again. CuacaMY also watches every saved place for
+          flood, storm and haze warnings, not just the one on screen.
+        </p>
+        <div class="saved" id="saved-list"></div>
+        <div class="empty empty--rich" id="saved-empty">
+          <svg class="empty__icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-star"></use></svg>
+          <p class="empty__title">You have not saved any places yet</p>
+          <p class="empty__body">
+            Search for a town in the box at the top, then press the
+            <svg class="empty__inline" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-star"></use></svg>
+            <strong>Save</strong> button next to its name. Up to 12 places, kept on this device.
+          </p>
+          <button class="btn btn--primary btn--sm" id="saved-empty-cta" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search"></use></svg>
+            Find a place to save
+          </button>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       VIEW · ALERTS
+       ════════════════════════════════════════════════════════════════════════ -->
+  <section id="view-alerts" class="view" role="tabpanel" aria-labelledby="tab-alerts" tabindex="-1" hidden>
+    <div class="view__head">
+      <h1>Hazard alerts</h1>
+      <p id="alerts-summary">Running checks…</p>
+    </div>
+
+    <div class="alert-tools">
+      <button class="btn" id="btn-notify" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-bell"></use></svg> Enable notifications
+      </button>
+      <button class="btn btn--ghost" id="btn-test-alarm" type="button">Hear the alarm</button>
+      <span class="card__hint">Alerts fire while this tab is open. A static site has no server, so background push is not possible.</span>
+    </div>
+
+    <div class="alerts" id="alerts-list"></div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         Who to actually contact. A dashboard that detects a flood and then
+         leaves you to search for the right department has done half a job.
+         ══════════════════════════════════════════════════════════════════ -->
+    <article class="card card--agencies" aria-labelledby="h-agencies">
+      <div class="card__head">
+        <h2 class="card__title" id="h-agencies">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-shield"></use></svg>
+          Report it — official Malaysian agencies
+        </h2>
+        <span class="card__hint">Checked <span id="agency-checked">—</span></span>
+      </div>
+      <p class="card__lede">
+        Everything CuacaMY shows you is computed from public models and open data. It is not an
+        official warning and it cannot send anyone to help you. These are the agencies that can:
+        each one is the body with legal responsibility for that hazard, with the number to ring and
+        the page where a report is actually filed.
+      </p>
+      <div class="agency-groups" id="agency-list"></div>
+      <p class="card__hint agency-foot">
+        Phone numbers and web addresses are reviewed periodically, but agencies do change them.
+        If a number does not connect, use the official site link beside it. In a life-threatening
+        emergency always dial <a href="tel:999"><strong>999</strong></a> first.
+      </p>
+    </article>
+
+    <div class="grid grid--analytics">
+      <article class="card" aria-labelledby="h-quakes">
+        <div class="card__head">
+          <h2 class="card__title" id="h-quakes">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-quake"></use></svg> Recent earthquakes within 2,000 km
+          </h2>
+          <span class="card__hint">USGS · last 7 days · M4.5+</span>
+        </div>
+        <div class="quakes" id="quake-list"></div>
+        <p class="empty" id="quake-empty">No earthquakes of magnitude 4.5 or above have been recorded near here in the last week.</p>
+      </article>
+
+      <article class="card" id="flood-panel" aria-labelledby="h-flood" hidden>
+        <div class="card__head">
+          <h2 class="card__title" id="h-flood">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-drop"></use></svg> River discharge
+          </h2>
+          <span class="tag" id="flood-verdict" data-tone="info">—</span>
+        </div>
+        <ul class="statlist">
+          <li><span>Today</span><strong id="flood-now">—</strong></li>
+          <li><span>90-day median</span><strong id="flood-median">—</strong></li>
+          <li><span>Peak in next 10 days</span><strong id="flood-peak">—</strong></li>
+        </ul>
+        <div class="chart-wrap chart-wrap--sm">
+          <canvas id="flood-chart" role="img" aria-label="Modelled river discharge for the next 30 days"></canvas>
+        </div>
+        <p class="card__hint">
+          Modelled from Copernicus GloFAS for the nearest river reach — an early signal, not a
+          street-level forecast. For gauge readings see
+          <a href="https://publicinfobanjir.water.gov.my/" target="_blank" rel="noopener noreferrer">JPS InfoBanjir</a>.
+        </p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       VIEW · SEASON & CLIMATE
+       ════════════════════════════════════════════════════════════════════════ -->
+  <section id="view-climate" class="view" role="tabpanel" aria-labelledby="tab-climate" tabindex="-1" hidden>
+    <div class="view__head">
+      <h1>Season &amp; climate</h1>
+      <p>Malaysia runs on monsoons, not four seasons. Below is the phase we are in now, and how this month compares with the thirty-year normal for your exact coordinates.</p>
+    </div>
+
+    <article class="card card--monsoon" aria-labelledby="h-monsoon">
+      <div class="card__head">
+        <h2 class="card__title" id="h-monsoon">Current monsoon phase</h2>
+        <span class="tag" id="monsoon-affects" data-kind="cache" hidden></span>
+      </div>
+      <div class="monsoon">
+        <div>
+          <p class="monsoon__name" id="monsoon-name">—</p>
+          <p class="monsoon__malay"><span id="monsoon-malay"></span> · <span id="monsoon-window"></span></p>
+          <p class="monsoon__summary" id="monsoon-summary"></p>
+          <ul class="monsoon__risks" id="monsoon-risks"></ul>
+        </div>
+      </div>
+      <div class="monsoon-bar" id="monsoon-bar"></div>
+    </article>
+
+    <article class="card" aria-labelledby="h-climate">
+      <div class="card__head">
+        <h2 class="card__title" id="h-climate">Local climate normal, 1991–2020</h2>
+        <button class="btn btn--sm" id="btn-climate" type="button">Compute for this location</button>
+      </div>
+
+      <p class="card__hint" id="climate-place"></p>
+      <p class="climate-status" id="climate-status" hidden></p>
+
+      <div id="climate-body" hidden>
+        <div class="climate-grid">
+          <div class="climate-cell">
+            <span class="climate-cell__label">Normal <span id="climate-month"></span> temperature</span>
+            <strong id="climate-normal-temp">—</strong>
+          </div>
+          <div class="climate-cell">
+            <span class="climate-cell__label">This month so far</span>
+            <strong id="climate-actual-temp">—</strong>
+            <span class="tag" id="climate-temp-anom" data-tone="info">—</span>
+          </div>
+          <div class="climate-cell">
+            <span class="climate-cell__label">Normal monthly rainfall</span>
+            <strong id="climate-normal-rain">—</strong>
+          </div>
+          <div class="climate-cell">
+            <span class="climate-cell__label">Rain this month so far</span>
+            <strong id="climate-actual-rain">—</strong>
+            <span class="tag" id="climate-rain-anom" data-tone="info">—</span>
+          </div>
+        </div>
+
+        <div class="chart-wrap chart-wrap--sm">
+          <canvas id="climate-chart" role="img" aria-label="Monthly climate normals for this location"></canvas>
+        </div>
+
+        <p class="card__hint" id="climate-note"></p>
+      </div>
+    </article>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       VIEW · EXPLORE MALAYSIA
+       ════════════════════════════════════════════════════════════════════════ -->
+  <section id="view-explore" class="view" role="tabpanel" aria-labelledby="tab-explore" tabindex="-1" hidden>
+    <div class="view__head">
+      <h1>Explore Malaysia</h1>
+      <p>Every state and federal territory, with <strong id="explore-count">0</strong> towns and districts built into the app — no network round-trip needed to find a place.</p>
+    </div>
+
+    <div class="statebar" id="state-filter" role="group" aria-label="Filter by state"></div>
+
+    <div class="explore-tools">
+      <label class="field field--inline">
+        <span class="field__label">Filter places</span>
+        <input type="search" id="explore-search" class="input" placeholder="e.g. Kuala, Bukit, Kota…" autocomplete="off">
+      </label>
+      <button class="btn" id="btn-compare" type="button">Compare state capitals</button>
+    </div>
+
+    <div class="places" id="places-list"></div>
+
+    <div class="card card--compare" id="compare-card" hidden aria-labelledby="h-compare">
+      <div class="card__head">
+        <h2 class="card__title" id="h-compare">State capitals — live comparison</h2>
+        <button class="icon-btn icon-btn--sm" id="compare-close" type="button" aria-label="Close comparison">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"></use></svg>
+        </button>
+      </div>
+      <div class="table-scroll">
+        <table class="table" id="compare-table">
+          <caption class="sr-only">Live weather for every Malaysian state capital</caption>
+          <thead>
+            <tr>
+              <th scope="col">Capital</th><th scope="col">State</th><th scope="col">Temp</th>
+              <th scope="col">Feels</th><th scope="col">Humidity</th><th scope="col">Wind</th>
+              <th scope="col">Conditions</th><th scope="col">Navigate</th>
+            </tr>
+          </thead>
+          <tbody id="compare-body"></tbody>
+        </table>
+      </div>
+      <p class="card__hint" id="compare-status"></p>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════════════════════
+       VIEW · WEATHER ANALYSIS
+       ════════════════════════════════════════════════════════════════════════ -->
+  <section id="view-analytics" class="view" role="tabpanel" aria-labelledby="tab-analytics" tabindex="-1" hidden>
+    <div class="view__head">
+      <h1>Weather analysis</h1>
+      <p>A fortnight of hourly observations — seven days behind, seven ahead — put through the standard
+         meteorological treatments. Every figure is followed by the numbers behind it.</p>
+    </div>
+
+    <div class="analysis-tools">
+      <p class="card__hint" id="wx-scope"></p>
+      <button class="btn btn--sm" id="btn-reanalyse" type="button">Recompute</button>
+    </div>
+
+    <p class="climate-status" id="wx-status" hidden></p>
+
+    <div id="wx-body" hidden>
+
+      <article class="card" aria-labelledby="h-wx-temp">
+        <h2 class="card__title" id="h-wx-temp">Temperature, apparent temperature and dew point</h2>
+        <div class="viz-legend" aria-hidden="true">
+          <span class="viz-legend__item"><i class="viz-legend__swatch" data-series="0"></i>Air</span>
+          <span class="viz-legend__item"><i class="viz-legend__swatch" data-series="1"></i>Feels like</span>
+          <span class="viz-legend__item"><i class="viz-legend__swatch" data-series="2"></i>Dew point</span>
+        </div>
+        <div class="chart-wrap chart-wrap--tall viz-host">
+          <canvas id="wx-temp" role="img" aria-label="Air temperature, apparent temperature and dew point over fourteen days"></canvas>
+        </div>
+        <p class="viz-insight" id="wx-temp-insight"></p>
+        <div class="table-scroll" id="wx-temp-table"></div>
+      </article>
+
+      <div class="grid grid--analysis">
+        <article class="card" aria-labelledby="h-wx-dt">
+          <h2 class="card__title" id="h-wx-dt">Mean temperature by hour of day</h2>
+          <div class="chart-wrap chart-wrap--sm viz-host">
+            <canvas id="wx-diurnal-temp" role="img" aria-label="Average temperature for each hour of the day"></canvas>
+          </div>
+        </article>
+        <article class="card" aria-labelledby="h-wx-dr">
+          <h2 class="card__title" id="h-wx-dr">Mean rain probability by hour of day</h2>
+          <div class="chart-wrap chart-wrap--sm viz-host">
+            <canvas id="wx-diurnal-rain" role="img" aria-label="Average probability of rain for each hour of the day"></canvas>
+          </div>
+        </article>
+      </div>
+      <p class="viz-insight" id="wx-diurnal-insight"></p>
+
+      <article class="card" aria-labelledby="h-wx-rain">
+        <h2 class="card__title" id="h-wx-rain">Rainfall</h2>
+        <div class="grid grid--analysis">
+          <div>
+            <p class="viz-subtitle">Daily total</p>
+            <div class="chart-wrap chart-wrap--sm viz-host">
+              <canvas id="wx-rain-daily" role="img" aria-label="Rainfall total for each day"></canvas>
+            </div>
+          </div>
+          <div>
+            <p class="viz-subtitle">Running total</p>
+            <div class="chart-wrap chart-wrap--sm viz-host">
+              <canvas id="wx-rain-cum" role="img" aria-label="Cumulative rainfall across the period"></canvas>
+            </div>
+          </div>
+        </div>
+        <p class="viz-insight" id="wx-rain-insight"></p>
+        <div class="table-scroll" id="wx-rain-table"></div>
+      </article>
+
+      <div class="grid grid--analysis">
+        <article class="card" aria-labelledby="h-wx-wind">
+          <h2 class="card__title" id="h-wx-wind">Wind rose</h2>
+          <div class="chart-wrap chart-wrap--square viz-host">
+            <canvas id="wx-rose" role="img" aria-label="Frequency of wind by direction and speed band"></canvas>
+          </div>
+          <div class="viz-legend" id="wx-rose-legend"></div>
+          <p class="viz-insight" id="wx-wind-insight"></p>
+          <div class="table-scroll" id="wx-wind-table"></div>
+        </article>
+
+        <article class="card" aria-labelledby="h-wx-press">
+          <h2 class="card__title" id="h-wx-press">Mean sea-level pressure</h2>
+          <div class="chart-wrap chart-wrap--sm viz-host">
+            <canvas id="wx-pressure" role="img" aria-label="Mean sea-level pressure over fourteen days"></canvas>
+          </div>
+          <p class="viz-insight" id="wx-pressure-insight"></p>
+          <h3 class="card__title">Sky and sun</h3>
+          <div class="table-scroll" id="wx-sky-table"></div>
+          <p class="viz-insight" id="wx-sky-insight"></p>
+        </article>
+      </div>
+
+      <article class="card" aria-labelledby="h-wx-heat">
+        <h2 class="card__title" id="h-wx-heat">Heat stress — estimated Wet Bulb Globe Temperature</h2>
+        <div class="chart-wrap chart-wrap--sm viz-host">
+          <canvas id="wx-heat" role="img" aria-label="Hours spent in each heat stress band"></canvas>
+        </div>
+        <p class="viz-insight" id="wx-heat-insight"></p>
+        <div class="table-scroll" id="wx-heat-table"></div>
+      </article>
+
+      <article class="card" aria-labelledby="h-wx-corr">
+        <h2 class="card__title" id="h-wx-corr">How the variables move together</h2>
+        <p class="viz-insight" id="wx-corr-insight"></p>
+        <div class="table-scroll" id="wx-corr-table"></div>
+      </article>
+
+      <details class="diag">
+        <summary>App diagnostics — how this page itself is performing</summary>
+        <p class="card__hint">
+          Core Web Vitals and API timings, measured in your browser. Nothing here is weather;
+          it is here so a slow session can be diagnosed.
+        </p>
+        <div class="table-scroll" id="wx-diag-table"></div>
+        <div class="card__actions">
+          <button class="btn btn--ghost btn--sm" id="btn-export" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg> Export JSON
+          </button>
+          <button class="btn btn--ghost btn--sm" id="btn-clear-analytics" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-trash"></use></svg> Clear
+          </button>
+        </div>
+      </details>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer__cols">
+
+    <div class="footer__col footer__col--emergency">
+      <h2 class="footer__h">In an emergency</h2>
+      <a class="footer__999" href="tel:999">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-phone"></use></svg>
+        <span><strong>999</strong><small>Police · Ambulance · Fire · Civil Defence</small></span>
+      </a>
+      <p class="footer__note">
+        Free from any phone, with or without credit. Nothing on this page replaces calling for help.
+      </p>
+    </div>
+
+    <div class="footer__col">
+      <h2 class="footer__h">Official warnings</h2>
+      <ul class="footer__links">
+        <li><a href="https://www.met.gov.my/en/amaran/amaran-cuaca/" target="_blank" rel="noopener noreferrer">MetMalaysia — weather warnings</a></li>
+        <li><a href="https://publicinfobanjir.water.gov.my/" target="_blank" rel="noopener noreferrer">JPS InfoBanjir — river levels</a></li>
+        <li><a href="https://apims.doe.gov.my/" target="_blank" rel="noopener noreferrer">DOE APIMS — official air quality</a></li>
+        <li><a href="https://www.met.gov.my/en/amaran/gempa-bumi-dan-tsunami/" target="_blank" rel="noopener noreferrer">MetMalaysia — earthquake &amp; tsunami</a></li>
+      </ul>
+    </div>
+
+    <div class="footer__col">
+      <h2 class="footer__h">Report a problem</h2>
+      <ul class="footer__links">
+        <li><a href="https://www.nadma.gov.my/" target="_blank" rel="noopener noreferrer">NADMA — disaster response</a></li>
+        <li><a href="https://www.bomba.gov.my/" target="_blank" rel="noopener noreferrer">Bomba — fire &amp; rescue</a></li>
+        <li><a href="https://www.tnb.com.my/contact-us" target="_blank" rel="noopener noreferrer">TNB — power outage · 15454</a></li>
+        <li><a href="https://aduan.skmm.gov.my/" target="_blank" rel="noopener noreferrer">MCMC — telco complaints</a></li>
+      </ul>
+      <p class="footer__note">
+        <a href="#alerts" id="foot-agencies">See the full directory with phone numbers →</a>
+      </p>
+    </div>
+
+    <div class="footer__col">
+      <h2 class="footer__h">Where the data comes from</h2>
+      <ul class="footer__links">
+        <li><a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo — forecast &amp; air quality</a></li>
+        <li><a href="https://global-flood.emergency.copernicus.eu/" target="_blank" rel="noopener noreferrer">Copernicus GloFAS — river discharge</a></li>
+        <li><a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener noreferrer">USGS — earthquakes</a></li>
+        <li><a href="https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5" target="_blank" rel="noopener noreferrer">ECMWF ERA5 — climate normals</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer__bar">
+    <p>
+      <strong>CuacaMY</strong> — built with vanilla HTML, CSS and JavaScript. No frameworks, no build step.
+      An independent project, not affiliated with or endorsed by any Malaysian government agency.
+      Forecasts and hazard estimates are computed from open models and are <strong>not</strong> official warnings.
+    </p>
+    <p class="footer__meta">
+      <span id="foot-version">v1.0.0</span>
+      <span class="dot" aria-hidden="true">•</span>
+      <span id="foot-status">Ready</span>
+    </p>
+  </div>
+</footer>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     DIALOG · ACCOUNT
+     ══════════════════════════════════════════════════════════════════════════ -->
+<dialog id="auth-dialog" class="dialog" aria-labelledby="auth-title">
+  <form method="dialog" class="dialog__close-form">
+    <button class="icon-btn icon-btn--sm dialog__x" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"></use></svg>
+    </button>
+  </form>
+
+  <!-- Signed-out state -->
+  <div id="auth-signed-out">
+    <h2 class="dialog__title" id="auth-title">Sign in to CuacaMY</h2>
+    <p class="dialog__sub">Sync your saved places and preferences across devices.</p>
+
+    <!-- Shown only when the site owner has connected Google. A visitor must
+         never be offered a button that cannot sign them in. -->
+    <div id="google-block" hidden>
+      <button class="btn btn--google" id="btn-google" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-google"></use></svg>
+        <span id="btn-google-label">Continue with Google</span>
+      </button>
+
+      <!-- Google draws its own button, and will only do so into a visible node. -->
+      <div class="google-host" id="google-host" hidden>
+        <p class="google-host__hint">Choose the Google account you want to use.</p>
+        <div id="google-render"></div>
+        <button class="btn btn--ghost btn--sm" id="google-cancel" type="button">Cancel</button>
+      </div>
+
+      <div class="divider"><span>or use email</span></div>
+    </div>
+
+    <form id="auth-form" novalidate>
+      <label class="field">
+        <span class="field__label">Email address</span>
+        <input class="input" type="email" id="auth-email" name="email" autocomplete="email" required placeholder="you@example.com">
+        <span class="field__error" id="auth-email-err" aria-live="polite"></span>
+      </label>
+      <label class="field">
+        <span class="field__label">Password</span>
+        <input class="input" type="password" id="auth-password" name="password" autocomplete="current-password" required minlength="8" placeholder="At least 8 characters">
+        <span class="field__error" id="auth-password-err" aria-live="polite"></span>
+        <span class="strength" id="auth-strength" hidden><span class="strength__bar" id="auth-strength-bar"></span><span class="strength__text" id="auth-strength-text"></span></span>
+      </label>
+      <div class="dialog__actions">
+        <button class="btn btn--primary" type="submit" id="auth-submit">Sign in</button>
+        <button class="btn btn--ghost" type="button" id="auth-switch">Create an account</button>
+      </div>
+      <p class="auth-msg" id="auth-msg" role="status"></p>
+    </form>
+
+    <p class="dialog__fineprint" id="auth-mode-note"></p>
+  </div>
+
+  <!-- Signed-in state -->
+  <div id="auth-signed-in" hidden>
+    <h2 class="dialog__title">Your account</h2>
+    <div class="profile">
+      <span class="avatar avatar--lg" id="profile-avatar" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><use href="#i-user"></use></svg>
+      </span>
+      <div>
+        <p class="profile__name" id="profile-name">—</p>
+        <p class="profile__email" id="profile-email">—</p>
+        <p class="profile__since" id="profile-since"></p>
+      </div>
+    </div>
+    <ul class="statlist">
+      <li><span>Saved places</span><strong id="profile-favs">0</strong></li>
+      <li><span>Searches recorded</span><strong id="profile-searches">0</strong></li>
+      <li><span>Storage backend</span><strong id="profile-backend">—</strong></li>
+    </ul>
+    <div class="dialog__actions">
+      <button class="btn btn--ghost" id="btn-admin" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-database"></use></svg> Database &amp; users
+      </button>
+      <button class="btn btn--ghost" id="btn-export-account" type="button">Download my data</button>
+      <button class="btn btn--danger" id="btn-signout" type="button">Sign out</button>
+    </div>
+  </div>
+</dialog>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     DIALOG · GOOGLE SIGN-IN SETUP
+     A dead "Continue with Google" button is the worst possible answer, so
+     pressing it without a provider configured opens this instead: the exact
+     steps, the exact origin to authorise, and one box to paste the result in.
+     ══════════════════════════════════════════════════════════════════════════ -->
+<dialog id="google-setup-dialog" class="dialog dialog--wide" aria-labelledby="gs-title">
+  <form method="dialog" class="dialog__close-form">
+    <button class="icon-btn icon-btn--sm dialog__x" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"></use></svg>
+    </button>
+  </form>
+
+  <p class="owner-flag">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-gear"></use></svg>
+    For the site owner — you only do this once
+  </p>
+  <h2 class="dialog__title" id="gs-title">Turn on Google sign-in for your visitors</h2>
+  <p class="dialog__sub">
+    Your visitors will never see this screen. Once you finish these steps, everybody who opens
+    your site gets a <strong>Continue with Google</strong> button that signs them in with one tap —
+    no forms, no passwords.
+  </p>
+  <p class="dialog__sub">
+    Why it takes any setup at all: Google does not let <em>any</em> website use Google accounts
+    until that website is registered with Google. That is Google's rule, not a limit of this app.
+    It is free, needs no billing account, and takes about five minutes.
+  </p>
+
+  <ol class="setup-steps">
+    <li>
+      <strong>Open the Google Cloud credentials page.</strong>
+      <a class="btn btn--ghost btn--sm" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-external"></use></svg> console.cloud.google.com
+      </a>
+      <span class="setup-steps__note">Sign in with the Google account that should own this app, then create a project if you have none.</span>
+    </li>
+    <li>
+      <strong>Configure the consent screen</strong> (left menu → <em>OAuth consent screen</em>).
+      Choose <em>External</em>, give the app a name and your email, and save. You can leave it in
+      Testing mode — add your own address under <em>Test users</em> and it works immediately.
+    </li>
+    <li>
+      <strong>Create credentials → OAuth client ID → Web application.</strong>
+    </li>
+    <li>
+      <strong>Add this exact address</strong> under both <em>Authorised JavaScript origins</em>
+      and <em>Authorised redirect URIs</em>:
+      <span class="copyrow">
+        <code id="gs-origin">—</code>
+        <button class="btn btn--ghost btn--sm" id="gs-copy" type="button">Copy</button>
+      </span>
+      <span class="setup-steps__note">It must match character for character — no trailing slash.</span>
+    </li>
+    <li>
+      <strong>Copy the Client ID</strong> Google shows you and paste it here:
+      <label class="field">
+        <span class="field__label">OAuth 2.0 Client ID</span>
+        <input class="input" type="text" id="gs-client-id" spellcheck="false" autocomplete="off"
+               placeholder="1234567890-abcdefg.apps.googleusercontent.com">
+        <span class="field__error" id="gs-err" aria-live="polite"></span>
+      </label>
+    </li>
+  </ol>
+
+  <div class="dialog__actions">
+    <button class="btn btn--primary" id="gs-save" type="button">Save and turn on Google sign-in</button>
+    <button class="btn btn--ghost" id="gs-clear" type="button">Remove the saved ID</button>
+  </div>
+
+  <p class="dialog__fineprint">
+    <strong>Is the Client ID a secret?</strong> No. It is a public identifier, designed to be
+    visible in the page, and it only works from the web addresses you authorised in step 4.
+    <br><br>
+    <strong>Where is it saved?</strong> In this browser only. To turn Google sign-in on for
+    everyone permanently, put the same ID into <code>config.js</code> in your repository —
+    see the README.
+    <br><br>
+    <strong>Want accounts that sync between devices?</strong> Add a Firebase config in Settings
+    instead. That gives you server-verified accounts and one central database, and it turns this
+    button on too.
+  </p>
+</dialog>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     DIALOG · ADMIN — the user database
+     ══════════════════════════════════════════════════════════════════════════ -->
+<dialog id="admin-dialog" class="dialog dialog--wide" aria-labelledby="admin-title">
+  <form method="dialog" class="dialog__close-form">
+    <button class="icon-btn icon-btn--sm dialog__x" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"></use></svg>
+    </button>
+  </form>
+
+  <h2 class="dialog__title" id="admin-title">Your user database</h2>
+  <p class="dialog__sub" id="admin-where">—</p>
+
+  <div class="admin-grid" id="admin-stats"></div>
+
+  <h3 class="admin-h3">Accounts on this device</h3>
+  <div class="table-scroll" id="admin-users"></div>
+
+  <details class="admin-note">
+    <summary>Why there is no single central table</summary>
+    <div class="admin-note__body">
+      <p>
+        CuacaMY is a static site: HTML, CSS and JavaScript on GitHub Pages, with no server of its
+        own. There is nowhere for a shared database to run, so by default each visitor's account
+        lives in <strong>their</strong> browser, in an IndexedDB database called
+        <code>cuacamy</code>, object store <code>users</code>. You can see it yourself in any
+        browser: open DevTools → Application → IndexedDB.
+      </p>
+      <p>
+        That is genuinely private — nobody's password ever leaves their device — but it means this
+        page can only show you the accounts on the device you are reading it on. It is not hiding
+        the rest; there is no "rest" to fetch.
+      </p>
+      <p>
+        <strong>If you want one real central database</strong> that you can open and read as the
+        owner, add a Firebase config in Settings. Accounts then live in Cloud Firestore, in a
+        Google Cloud project you own, in a collection called <code>users</code> — one document per
+        account, visible in the Firebase console, with server-side security rules. The app switches
+        over automatically and this panel will point at it.
+      </p>
+      <p class="admin-note__links">
+        <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-external"></use></svg> Firebase console
+        </a>
+        <a href="https://firebase.google.com/docs/firestore/security/get-started" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-external"></use></svg> Firestore security rules
+        </a>
+      </p>
+    </div>
+  </details>
+
+  <div class="dialog__actions dialog__actions--wrap">
+    <button class="btn btn--ghost btn--sm" id="admin-export-json" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg> Export JSON
+    </button>
+    <button class="btn btn--ghost btn--sm" id="admin-export-csv" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg> Export CSV
+    </button>
+    <button class="btn btn--ghost btn--sm" id="admin-persist" type="button">Protect from eviction</button>
+    <button class="btn btn--ghost btn--sm" id="admin-refresh" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-refresh"></use></svg> Refresh
+    </button>
+    <button class="btn btn--danger btn--sm" id="admin-wipe" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-trash"></use></svg> Delete everything
+    </button>
+  </div>
+
+  <p class="dialog__fineprint">
+    Password hashes and salts are never shown here and are excluded from every export.
+    Deleting an account removes its record and its saved places from this device permanently.
+  </p>
+</dialog>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     DIALOG · INSTALL
+     Every browser installs a web app differently, and two of them cannot be
+     prompted from code at all. Only the block matching the visitor's browser
+     is shown, so nobody reads instructions for a device they are not holding.
+     ══════════════════════════════════════════════════════════════════════════ -->
+<dialog id="install-dialog" class="dialog dialog--wide" aria-labelledby="install-steps-title">
+  <form method="dialog" class="dialog__close-form">
+    <button class="icon-btn icon-btn--sm dialog__x" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"></use></svg>
+    </button>
+  </form>
+
+  <h2 class="dialog__title" id="install-steps-title">Add CuacaMY to your device</h2>
+  <p class="dialog__sub">
+    CuacaMY installs straight from your browser — there is nothing to download from a store.
+    Once it is on your home screen it opens like any other app, full screen, and keeps working
+    when you have no signal.
+  </p>
+
+  <!-- iPhone / iPad, Safari -->
+  <div data-platform="ios-safari" hidden>
+    <ol class="install-steps">
+      <li>
+        <span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-share-ios"></use></svg></span>
+        Tap the <strong>Share</strong> button at the bottom of Safari — the square with an arrow pointing up.
+      </li>
+      <li>
+        <span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus-square"></use></svg></span>
+        Scroll down the list and tap <strong>Add to Home Screen</strong>.
+      </li>
+      <li>
+        <span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"></use></svg></span>
+        Tap <strong>Add</strong> in the top right. CuacaMY appears on your home screen.
+      </li>
+    </ol>
+    <p class="install-note">
+      iPhone and iPad only allow this from <strong>Safari</strong>. It is not available in Chrome
+      or Firefox on iOS — that is an Apple restriction, not a fault with this app.
+    </p>
+  </div>
+
+  <!-- iPhone / iPad, but not Safari -->
+  <div data-platform="ios-other" hidden>
+    <p class="install-note install-note--warn">
+      You are using Chrome, Firefox or Edge on an iPhone or iPad. Apple only lets
+      <strong>Safari</strong> add apps to the home screen.
+    </p>
+    <ol class="install-steps">
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-external"></use></svg></span>
+        Copy this page's address, open <strong>Safari</strong>, and paste it there.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-share-ios"></use></svg></span>
+        Tap <strong>Share</strong> at the bottom of Safari.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus-square"></use></svg></span>
+        Tap <strong>Add to Home Screen</strong>, then <strong>Add</strong>.</li>
+    </ol>
+  </div>
+
+  <!-- Android, Chrome / Samsung Internet / Edge -->
+  <div data-platform="android" hidden>
+    <ol class="install-steps">
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dots"></use></svg></span>
+        Tap the <strong>⋮ menu</strong> in the top right of your browser.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg></span>
+        Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"></use></svg></span>
+        Confirm with <strong>Install</strong>. CuacaMY joins your other apps.</li>
+    </ol>
+    <p class="install-note">
+      If your browser offered you an <strong>Install app</strong> button on this page, that does
+      the same thing in one tap.
+    </p>
+  </div>
+
+  <!-- Android, Firefox -->
+  <div data-platform="android-firefox" hidden>
+    <ol class="install-steps">
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dots"></use></svg></span>
+        Tap the <strong>⋮ menu</strong> in Firefox.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus-square"></use></svg></span>
+        Tap <strong>Add to Home screen</strong>.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"></use></svg></span>
+        Confirm. CuacaMY appears on your home screen.</li>
+    </ol>
+  </div>
+
+  <!-- Desktop Chrome / Edge -->
+  <div data-platform="desktop" hidden>
+    <ol class="install-steps">
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-download"></use></svg></span>
+        Look for the <strong>install icon</strong> at the right-hand end of the address bar —
+        a small screen with a downward arrow.</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-dots"></use></svg></span>
+        No icon? Open the browser menu and choose
+        <strong>Cast, save and share → Install page as app</strong> (Chrome), or
+        <strong>Apps → Install this site as an app</strong> (Edge).</li>
+      <li><span class="install-steps__icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"></use></svg></span>
+        Click <strong>Install</strong>. CuacaMY opens in its own window and appears in your
+        Start menu, Dock or Applications folder.</li>
+    </ol>
+  </div>
+
+  <!-- Desktop Firefox -->
+  <div data-platform="desktop-firefox" hidden>
+    <p class="install-note install-note--warn">
+      Firefox on a computer does not support installing web apps. Everything still works
+      normally in the browser — including offline use.
+    </p>
+    <p class="install-note">
+      To get the installed experience, open this page in <strong>Chrome</strong>,
+      <strong>Edge</strong> or <strong>Brave</strong>. On an Android phone, Firefox
+      <em>can</em> add it to your home screen from the ⋮ menu.
+    </p>
+  </div>
+
+  <p class="dialog__fineprint">
+    Installing uses about 1 MB and needs no account. To remove it later, delete the icon like
+    any other app — nothing is left behind on your device.
+  </p>
+</dialog>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     DIALOG · SETTINGS
+     ══════════════════════════════════════════════════════════════════════════ -->
+<dialog id="settings-dialog" class="dialog" aria-labelledby="settings-title">
+  <form method="dialog" class="dialog__close-form">
+    <button class="icon-btn icon-btn--sm dialog__x" aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-close"></use></svg>
+    </button>
+  </form>
+  <h2 class="dialog__title" id="settings-title">Settings</h2>
+
+  <label class="field">
+    <span class="field__label">OpenWeatherMap API key</span>
+    <input class="input" type="password" id="set-apikey" placeholder="Paste your free API key" autocomplete="off" spellcheck="false">
+    <span class="field__hint">
+      Stored only in this browser. For a public deployment, copy <code>config.example.js</code>
+      to <code>config.js</code> and add a domain-restricted key there.
+    </span>
+  </label>
+
+  <label class="field">
+    <span class="field__label">Google Client ID — the quick way to enable Google sign-in</span>
+    <input class="input" type="text" id="set-google-id" spellcheck="false" autocomplete="off"
+           placeholder="1234567890-abcdefg.apps.googleusercontent.com">
+    <span class="field__hint">
+      An OAuth 2.0 Web client ID is all “Sign in with Google” needs — no Firebase project,
+      no billing account. <button type="button" class="linkish" id="set-google-wizard">Open the guided setup</button>
+    </span>
+  </label>
+
+  <label class="field">
+    <span class="field__label">Firebase config — full accounts with cross-device sync</span>
+    <textarea class="input input--code" id="set-firebase" rows="5" spellcheck="false" autocomplete="off"
+      placeholder='{ "apiKey": "AIza…", "authDomain": "your-project.firebaseapp.com", "projectId": "your-project", "appId": "1:…" }'></textarea>
+    <span class="field__hint">
+      Google sign-in needs an identity provider, and a static site cannot supply one on its own.
+      Create a free Firebase project, enable <strong>Google</strong> under Authentication → Sign-in method,
+      add this site to <strong>Authorized domains</strong>, then paste the web config object here.
+      It is not a secret — it identifies your project; your security comes from the authorised-domain
+      list and Firestore rules. Stored in this browser only.
+    </span>
+    <span class="field__error" id="set-firebase-err" aria-live="polite"></span>
+  </label>
+
+  <label class="field">
+    <span class="field__label">Weather data source</span>
+    <select class="input" id="set-provider">
+      <option value="auto">Automatic — OpenWeatherMap if a key is set, otherwise Open-Meteo</option>
+      <option value="open-meteo">Open-Meteo — free, no key needed</option>
+      <option value="owm">OpenWeatherMap — requires the key above</option>
+    </select>
+    <span class="field__hint">Open-Meteo needs no sign-up, which is why it is the default.</span>
+  </label>
+
+  <label class="field">
+    <span class="field__label">Alert me at</span>
+    <select class="input" id="set-severity">
+      <option value="2">Advisory and above — more alerts, earlier warning</option>
+      <option value="3">Warning and above — recommended</option>
+      <option value="4">Danger only — the most serious events</option>
+    </select>
+  </label>
+
+  <label class="switch">
+    <input type="checkbox" id="set-alerts" checked>
+    <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+    <span class="switch__label">Hazard alerts <small>Rain, storms, wind, heat, haze, floods and earthquakes</small></span>
+  </label>
+
+  <label class="switch">
+    <input type="checkbox" id="set-alert-sound" checked>
+    <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+    <span class="switch__label">Audible alarm <small>A tone when a new alert fires</small></span>
+  </label>
+
+  <label class="field">
+    <span class="field__label">Units</span>
+    <select class="input" id="set-units">
+      <option value="metric">Metric — °C, km/h, hPa</option>
+      <option value="imperial">Imperial — °F, mph, hPa</option>
+    </select>
+  </label>
+
+  <label class="field">
+    <span class="field__label">Home location on startup</span>
+    <select class="input" id="set-home">
+      <option value="last">Last viewed place</option>
+      <option value="geo">Detect my location</option>
+      <option value="kl">Kuala Lumpur</option>
+    </select>
+  </label>
+
+  <label class="switch">
+    <input type="checkbox" id="set-analytics" checked>
+    <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+    <span class="switch__label">Record local usage analytics <small>Never leaves your device</small></span>
+  </label>
+
+  <label class="switch">
+    <input type="checkbox" id="set-motion">
+    <span class="switch__track" aria-hidden="true"><span class="switch__thumb"></span></span>
+    <span class="switch__label">Reduce motion <small>Disable chart and card animations</small></span>
+  </label>
+
+  <div class="field">
+    <span class="field__label">App version</span>
+    <div class="version-row">
+      <code id="set-version">—</code>
+      <button class="btn btn--ghost btn--sm" id="btn-check-update" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#i-refresh"></use></svg> Check for updates
+      </button>
+      <button class="btn btn--ghost btn--sm" id="btn-hard-refresh" type="button">Force a fresh copy</button>
+    </div>
+    <span class="field__hint">
+      CuacaMY updates itself, but if you ever think you are looking at an old version,
+      “Force a fresh copy” clears every cache and reloads. Your account and saved places are not touched.
+    </span>
+  </div>
+
+  <div class="dialog__actions">
+    <button class="btn btn--ghost" id="btn-reset" type="button">Reset all local data</button>
+    <button class="btn btn--primary" id="btn-save-settings" type="button">Save settings</button>
+  </div>
+</dialog>
+
+<!-- Toast notifications -->
+<div class="toasts" id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+
+<!-- app.js is an ES module; it dynamically imports the optional, git-ignored
+     ./config.js at startup and degrades gracefully when the file is absent. -->
+<script src="./app.js" type="module"></script>
+</body>
+</html>

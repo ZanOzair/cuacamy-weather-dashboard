@@ -12,7 +12,7 @@
  * Run: node tools/static-checks.mjs
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 
 const html = readFileSync('index.html', 'utf8');
 const app  = readFileSync('app.js', 'utf8');
@@ -109,6 +109,32 @@ const headings = new Set([...readme.matchAll(/^#{2,4}\s+(.+)$/gm)].map((m) => sl
 const brokenAnchors = [...readme.matchAll(/\]\(#([^)]+)\)/g)]
   .map((m) => m[1]).filter((a) => !headings.has(a));
 check('Every in-page README link resolves', brokenAnchors.length === 0, brokenAnchors.join(', '));
+
+/* ── 10 · A custom domain, if configured, must be well formed ─────────── */
+// GitHub Pages reads this file literally. A stray "https://", a trailing slash
+// or a second line does not produce a helpful error — the domain simply does
+// not serve, and the cause is invisible.
+if (existsSync('CNAME')) {
+  const raw = readFileSync('CNAME', 'utf8');
+  const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  const domain = lines[0] || '';
+  const problems = [];
+  if (lines.length !== 1) problems.push(`expected exactly one line, found ${lines.length}`);
+  if (/^https?:\/\//i.test(domain)) problems.push('remove the https:// prefix');
+  if (domain.endsWith('/')) problems.push('remove the trailing slash');
+  if (domain.includes('/')) problems.push('a path is not allowed — the hostname only');
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(domain)) {
+    problems.push(`"${domain}" is not a valid hostname`);
+  }
+  check('The CNAME custom domain is well formed', problems.length === 0, problems.join('; '));
+
+  // The README should send people to the site that actually serves them.
+  const stillOld = readme.includes('zanozair.github.io/cuacamy-weather-dashboard');
+  check('The README points at the custom domain, not the old github.io address',
+    !stillOld, stillOld ? `CNAME says ${domain} but the README still links github.io` : '');
+} else {
+  console.log('· No CNAME file — the site serves from github.io (see docs/CUSTOM-DOMAIN.md)');
+}
 
 console.log('');
 if (failures.length) {

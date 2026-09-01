@@ -357,6 +357,29 @@ so a broken deploy fails loudly instead of sitting there silently.
 
 Your site appears at `https://YOUR-USERNAME.github.io/YOUR-REPO-NAME/`.
 
+### Use your own domain instead
+
+Prefer `cuacamy.my` to a github.io address? Hosting stays free — GitHub Pages serves custom
+domains at no cost and issues the HTTPS certificate itself. You only pay for the name,
+roughly **RM 60–100 a year** for a `.my`, or **USD 10–15** for a `.com`.
+
+**→ [Full guide: Putting CuacaMY on your own domain](docs/CUSTOM-DOMAIN.md)** — which ending
+to pick, the exact DNS records, and the two things that break if you forget them.
+
+> **`.com.my` needs a registered Malaysian business** (an SSM number). If you do not have
+> one, register **`.my`** instead — it is open to individuals and reads better anyway.
+
+Once you own the name, switching is one command:
+
+```bash
+node tools/set-domain.mjs cuacamy.my     # or --clear to go back
+```
+
+The repository is already prepared: the app uses no absolute URLs, the deploy workflow
+follows your domain automatically and verifies *that* address rather than github.io, and it
+refuses to publish if a custom domain is set in Settings without a matching `CNAME` file —
+which would otherwise take your site offline on the next deploy.
+
 ### Optional: let visitors sign in with Google
 
 By default the app offers email-and-password accounts and the Google button is hidden.

@@ -42,6 +42,34 @@ jobs:
           rsync -a --exclude='.git' --exclude='.github' --exclude='docs' ./ "$site/"
           touch "$site/.nojekyll"
 
+          # Custom domain.
+          #
+          # This job force-pushes gh-pages from a fresh git init, which means
+          # anything on that branch that is not in this directory is destroyed.
+          # GitHub writes a CNAME file to gh-pages when you set a custom domain
+          # in Settings -> Pages, so without care the very next deploy would
+          # delete it and drop the site back to github.io — with a broken
+          # domain in between. Keeping CNAME in the repository instead makes it
+          # part of every publish, and the check below catches the mismatch if
+          # someone sets the domain only in Settings.
+          if [ -f CNAME ]; then
+            echo "Custom domain from repository CNAME: $(cat CNAME)"
+          fi
+
+          configured=$(curl -sS -H "Authorization: Bearer ${TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages" 2>/dev/null \
+            | python3 -c "import sys,json;print((json.load(sys.stdin).get('cname') or ''))" 2>/dev/null || echo "")
+
+          if [ -n "$configured" ] && [ ! -f CNAME ]; then
+            echo "::error::Pages is configured for the custom domain '${configured}', but there is no CNAME file in the repository. This publish would delete it and take the site offline. Create a file named CNAME containing '${configured}' and commit it."
+            exit 1
+          fi
+          if [ -n "$configured" ] && [ "$(cat CNAME)" != "$configured" ]; then
+            echo "::error::CNAME in the repository says '$(cat CNAME)' but Pages is configured for '${configured}'. They must match."
+            exit 1
+          fi
+
           # Stamp the build into the service worker. This is what makes an
           # update reach people: a browser only re-installs a worker whose
           # source bytes differ, so a deploy that changed app.js but left
@@ -68,11 +96,24 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     steps:
+      # Needed so the step below can read CNAME and check the real domain.
+      - uses: actions/checkout@v4
+
       - name: Wait for Pages to serve the new build, then check it
         run: |
           set -uo pipefail
-          owner="$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')"
-          url="https://${owner}.github.io/${GITHUB_REPOSITORY#*/}/"
+          # Check the address people actually type. Once a custom domain is in
+          # use, verifying github.io proves nothing about whether the real site
+          # works — and github.io then only redirects, so a DNS or certificate
+          # problem on the custom domain would go unnoticed.
+          if [ -f CNAME ] && [ -s CNAME ]; then
+            domain="$(tr -d '[:space:]' < CNAME)"
+            url="https://${domain}/"
+            echo "Custom domain in use: ${domain}"
+          else
+            owner="$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')"
+            url="https://${owner}.github.io/${GITHUB_REPOSITORY#*/}/"
+          fi
           want="${GITHUB_SHA:0:12}"
           echo "Checking $url for build ${want}"
 

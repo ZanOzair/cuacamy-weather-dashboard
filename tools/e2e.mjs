@@ -167,11 +167,37 @@ if (climate.shown) {
   notes.push(`Climate — normal ${climate.normalTemp}, observed ${climate.actualTemp}, ${climate.anom}`);
   notes.push(`Climate — rain normal ${climate.normalRain}, observed ${climate.actualRain}, ${climate.rainAnom}`);
   notes.push(`Climate note: ${(climate.note || '').slice(0, 160)}`);
-  // A monthly mean temperature anomaly beyond 3 °C in the tropics is far more
-  // likely to be a bug in the comparison than real weather, so treat it as one.
+  // Two legitimate outcomes, and the test has to accept both.
+  //
+  // ERA5 reanalysis is finalised about five days behind real time, so in the
+  // first days of a month there is genuinely nothing to compare against yet.
+  // The app says so plainly and shows no anomaly — that is correct behaviour,
+  // not a failure. Asserting a number unconditionally made this build fail on
+  // the 1st of September for a reason that had nothing to do with the commit,
+  // and would have done the same at the start of every month.
+  //
+  // When there IS an observed month-to-date, the bound still applies: a monthly
+  // mean anomaly beyond 3 °C in the tropics is far more likely to be a bug in
+  // the comparison than real weather. That bound is what caught the two
+  // different reanalysis models being differenced against each other.
   const a = parseFloat((climate.anom || '').replace(/[^0-9.+-]/g, ''));
-  check('Temperature anomaly is physically plausible', Number.isFinite(a) && Math.abs(a) <= 3,
-        `${climate.anom} (normal ${climate.normalTemp}, observed ${climate.actualTemp})`);
+  const noDataYet = /no finalised reanalysis days yet/i.test(climate.note || '');
+
+  if (noDataYet) {
+    check('Month-to-date is honestly reported as not yet available',
+      !Number.isFinite(a),
+      `note says no data, but an anomaly of "${climate.anom}" was shown anyway`);
+    notes.push('Climate: month-to-date not yet finalised by ERA5 — anomaly correctly withheld');
+  } else {
+    check('Temperature anomaly is physically plausible', Number.isFinite(a) && Math.abs(a) <= 3,
+          `${climate.anom} (normal ${climate.normalTemp}, observed ${climate.actualTemp})`);
+  }
+
+  // Either way the 30-year normal itself must be a sane tropical temperature —
+  // that half of the computation does not depend on the current month at all.
+  const n = parseFloat((climate.normalTemp || '').replace(/[^0-9.-]/g, ''));
+  check('The 30-year normal is a plausible Malaysian temperature',
+    Number.isFinite(n) && n >= 20 && n <= 33, climate.normalTemp);
 }
 
 // Weather analysis — the heaviest view, and the one the whole tab is now for.
